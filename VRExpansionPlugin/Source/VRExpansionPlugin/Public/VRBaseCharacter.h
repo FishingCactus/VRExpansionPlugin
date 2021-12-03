@@ -11,6 +11,8 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/Controller.h"
 #include "Components/CapsuleComponent.h"
+
+#include "SwarmsBase/Characters/SWCharacterPlayerBase.h"
 #include "VRBaseCharacter.generated.h"
 
 class AVRPlayerController;
@@ -239,7 +241,7 @@ struct TStructOpsTypeTraits< FVRReplicatedCapsuleHeight > : public TStructOpsTyp
 };
 
 UCLASS()
-class VREXPANSIONPLUGIN_API AVRBaseCharacter : public ACharacter
+class VREXPANSIONPLUGIN_API AVRBaseCharacter : public ASWCharacterPlayerBase
 {
 	GENERATED_BODY()
 
