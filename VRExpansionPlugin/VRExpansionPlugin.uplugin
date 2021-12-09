@@ -29,6 +29,10 @@
   "Plugins": [
     {
       "Name": "PhysXVehicles",
+      "Enabled": false
+    },
+    {
+      "Name": "SwarmsBase",
       "Enabled": true
     }
 	]
