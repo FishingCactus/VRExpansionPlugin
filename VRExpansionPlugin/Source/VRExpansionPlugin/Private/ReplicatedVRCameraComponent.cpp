@@ -10,6 +10,18 @@
 #include "VRBaseCharacter.h"
 #include "IHeadMountedDisplay.h"
 
+// Variation of XRSystem->IsHeadTrackingAllowedForWorld which checks if PIEInstanceID <= 1 instead of == 0
+// This seems to fix the client not being able to get the HMD transform in PIE
+static bool IsHeadTrackingAllowedForWorld( const UWorld & world )
+{
+    return GEngine->XRSystem.IsValid()
+        && GEngine->XRSystem->IsHeadTrackingAllowed()
+#if WITH_EDITOR
+           && ( ( world.WorldType != EWorldType::PIE ) || ( world.GetOutermost()->PIEInstanceID <= 1 ) )
+#endif
+    ;
+}
+
 
 UReplicatedVRCameraComponent::UReplicatedVRCameraComponent(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -136,7 +148,8 @@ void UReplicatedVRCameraComponent::UpdateTracking(float DeltaTime)
 	if (bHasAuthority)
 	{
 		// For non view target positional updates (third party and the like)
-		if (bSetPositionDuringTick && bLockToHmd && GEngine->XRSystem.IsValid() && GEngine->XRSystem->IsHeadTrackingAllowedForWorld(*GetWorld()))
+        if ( bSetPositionDuringTick && bLockToHmd && IsHeadTrackingAllowedForWorld( *GetWorld() ) )
+			//GEngine->XRSystem.IsValid() && GEngine->XRSystem->IsHeadTrackingAllowedForWorld( *GetWorld() ) )
 		{
 			//ResetRelativeTransform();
 			FQuat Orientation;
@@ -272,7 +285,8 @@ void UReplicatedVRCameraComponent::GetCameraView(float DeltaTime, FMinimalViewIn
 
 		if (XRCamera.IsValid())
 		{
-			if (XRSystem->IsHeadTrackingAllowedForWorld(*GetWorld()))
+            // if (XRSystem->IsHeadTrackingAllowedForWorld(*GetWorld()))
+		    if ( IsHeadTrackingAllowedForWorld( *GetWorld() ) )
 			{
 				const FTransform ParentWorld = CalcNewComponentToWorld(FTransform());
 				XRCamera->SetupLateUpdate(ParentWorld, this, bLockToHmd == 0);
