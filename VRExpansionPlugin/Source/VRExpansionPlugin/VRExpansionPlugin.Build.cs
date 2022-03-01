@@ -70,7 +70,8 @@ public class VRExpansionPlugin : ModuleRules
                     "NavigationSystem",
                     "AIModule",
                     "AnimGraphRuntime",
-                    "SwarmsBase"
+                    "SwarmsBase",
+                    "ModularGameplayActors"
 
                     //"Renderer",
                     //"UtilityShaders"

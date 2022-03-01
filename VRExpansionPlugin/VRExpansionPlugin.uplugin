@@ -26,14 +26,18 @@
 	  "LoadingPhase": "PostEngineInit"
     }
   ],
-	"Plugins": [
-		{
-			"Name": "ChaosVehiclesPlugin",
-			"Enabled": true
-		},
-		{
-			"Name": "SwarmsBase",
-			"Enabled": true
-		}
-	]
+  "Plugins": [
+    {
+      "Name": "ChaosVehiclesPlugin",
+      "Enabled": true
+    },
+    {
+      "Name": "SwarmsBase",
+      "Enabled": true
+    },
+    {
+      "Name": "ModularGameplayActors",
+      "Enabled": true
+    }
+  ]
 }
