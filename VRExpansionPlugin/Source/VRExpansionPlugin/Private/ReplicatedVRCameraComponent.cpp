@@ -2,7 +2,8 @@
 
 #include "ReplicatedVRCameraComponent.h"
 #include "Net/UnrealNetwork.h"
-#include "Engine/Engine.h"
+//#include "Engine/Engine.h"
+#include "Net/UnrealNetwork.h"
 #include "VRBaseCharacter.h"
 #include "IXRTrackingSystem.h"
 #include "IXRCamera.h"
@@ -10,16 +11,42 @@
 #include "VRBaseCharacter.h"
 #include "IHeadMountedDisplay.h"
 
-// Variation of XRSystem->IsHeadTrackingAllowedForWorld which checks if PIEInstanceID <= 1 instead of == 0
-// This seems to fix the client not being able to get the HMD transform in PIE
-static bool IsHeadTrackingAllowedForWorld( const UWorld & world )
+
+// CTPEEPEE's workaround until epic fixes their function
+// This doesn't fix some of the other areas that use this for XR but it at least gets the
+// view correct in the preview
+// #TODO: REMOVE ASAP when epic fixes it
+bool TMP_IsHeadTrackingAllowedForWorld(IXRTrackingSystem* XRSystem, UWorld* World)
 {
-    return GEngine->XRSystem.IsValid()
-        && GEngine->XRSystem->IsHeadTrackingAllowed()
 #if WITH_EDITOR
-           && ( ( world.WorldType != EWorldType::PIE ) || ( world.GetOutermost()->PIEInstanceID <= 1 ) )
+	if (GIsEditor)
+	{
+		UEditorEngine* EdEngine = Cast<UEditorEngine>(GEngine);
+		TOptional<FPlayInEditorSessionInfo> PlayInEditorSessionInfo = EdEngine->GetPlayInEditorSessionInfo();
+		
+		check(PlayInEditorSessionInfo.IsSet())
+			FRequestPlaySessionParams RequestPlaySessionParams = PlayInEditorSessionInfo.GetValue().OriginalRequestParams;
+		ULevelEditorPlaySettings* PlaySettings = RequestPlaySessionParams.EditorPlaySettings;
+		check(PlaySettings);
+
+		// Not loading under a single process, we'll depend on the end user to handle it here to initialize the correct HMD setup
+		const bool bRunUnderOneProcess = [&PlaySettings] { bool RunUnderOneProcess(false); return (PlaySettings->GetRunUnderOneProcess(RunUnderOneProcess) && RunUnderOneProcess); }();
+		if (!bRunUnderOneProcess)
+		{
+			return XRSystem->IsHeadTrackingAllowedForWorld(*World);
+		}
+
+		int32 NumClients = 0;
+		PlaySettings->GetPlayNumberOfClients(NumClients);
+		EPlayNetMode PlayNetMode;
+		PlaySettings->GetPlayNetMode(PlayNetMode);
+		int32 AllowedPIEInstanceID = PlayNetMode == PIE_Client ? 1 : 0;
+		// If join a server when PIEInstanceID will be index none. just gonna assume that's fine. might actually be issues if you have two clients when you join a server...
+		int32 PIEInstanceID = World->GetOutermost()->GetPIEInstanceID();
+		return XRSystem->IsHeadTrackingAllowed() && ((World->WorldType != EWorldType::PIE) || (World->GetOutermost()->GetPIEInstanceID() == AllowedPIEInstanceID) || World->GetOutermost()->GetPIEInstanceID() == INDEX_NONE);
+	}
 #endif
-    ;
+	return XRSystem->IsHeadTrackingAllowedForWorld(*World);
 }
 
 
@@ -134,7 +161,7 @@ void UReplicatedVRCameraComponent::OnAttachmentChanged()
 	}
 	else
 	{
-		AttachChar.Reset();
+		AttachChar = nullptr;
 	}
 
 	Super::OnAttachmentChanged();
@@ -148,8 +175,7 @@ void UReplicatedVRCameraComponent::UpdateTracking(float DeltaTime)
 	if (bHasAuthority)
 	{
 		// For non view target positional updates (third party and the like)
-        if ( bSetPositionDuringTick && bLockToHmd && IsHeadTrackingAllowedForWorld( *GetWorld() ) )
-			//GEngine->XRSystem.IsValid() && GEngine->XRSystem->IsHeadTrackingAllowedForWorld( *GetWorld() ) )
+		if (bSetPositionDuringTick && bLockToHmd && GEngine->XRSystem.IsValid() && GEngine->XRSystem->IsHeadTrackingAllowedForWorld(*GetWorld()))
 		{
 			//ResetRelativeTransform();
 			FQuat Orientation;
@@ -212,7 +238,7 @@ void UReplicatedVRCameraComponent::TickComponent(float DeltaTime, enum ELevelTic
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 
-	if (!bUpdateInCharacterMovement || !AttachChar.IsValid())
+	if (!bUpdateInCharacterMovement || !IsValid(AttachChar))
 	{
 		UpdateTracking(DeltaTime);
 	}
@@ -285,8 +311,8 @@ void UReplicatedVRCameraComponent::GetCameraView(float DeltaTime, FMinimalViewIn
 
 		if (XRCamera.IsValid())
 		{
-            // if (XRSystem->IsHeadTrackingAllowedForWorld(*GetWorld()))
-		    if ( IsHeadTrackingAllowedForWorld( *GetWorld() ) )
+			//if (XRSystem->IsHeadTrackingAllowedForWorld(*GetWorld()))
+			if (TMP_IsHeadTrackingAllowedForWorld(XRSystem, GetWorld()))
 			{
 				const FTransform ParentWorld = CalcNewComponentToWorld(FTransform());
 				XRCamera->SetupLateUpdate(ParentWorld, this, bLockToHmd == 0);

@@ -1,6 +1,9 @@
 // Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "Grippables/GrippableSphereComponent.h"
+#include "GripMotionControllerComponent.h"
+#include "VRExpansionFunctionLibrary.h"
+#include "GripScripts/VRGripScriptBase.h"
 #include "Net/UnrealNetwork.h"
 
   //=============================================================================
@@ -26,13 +29,15 @@ UGrippableSphereComponent::UGrippableSphereComponent(const FObjectInitializer& O
 
 	VRGripInterfaceSettings.bIsHeld = false;
 	bRepGripSettingsAndGameplayTags = true;
+	bReplicateGripScripts = false;
 }
 
 void UGrippableSphereComponent::GetLifetimeReplicatedProps(TArray< class FLifetimeProperty > & OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	
-	DOREPLIFETIME/*_CONDITION*/(UGrippableSphereComponent, GripLogicScripts);// , COND_Custom);
+	DOREPLIFETIME_CONDITION(UGrippableSphereComponent, GripLogicScripts, COND_Custom);
+	DOREPLIFETIME(UGrippableSphereComponent, bReplicateGripScripts)
 	DOREPLIFETIME(UGrippableSphereComponent, bRepGripSettingsAndGameplayTags);
 	DOREPLIFETIME(UGrippableSphereComponent, bReplicateMovement);
 	DOREPLIFETIME_CONDITION(UGrippableSphereComponent, VRGripInterfaceSettings, COND_Custom);
@@ -46,6 +51,7 @@ void UGrippableSphereComponent::PreReplication(IRepChangedPropertyTracker & Chan
 	// Don't replicate if set to not do it
 	DOREPLIFETIME_ACTIVE_OVERRIDE(UGrippableSphereComponent, VRGripInterfaceSettings, bRepGripSettingsAndGameplayTags);
 	DOREPLIFETIME_ACTIVE_OVERRIDE(UGrippableSphereComponent, GameplayTags, bRepGripSettingsAndGameplayTags);
+	DOREPLIFETIME_ACTIVE_OVERRIDE(UGrippableSphereComponent, GripLogicScripts, bReplicateGripScripts);
 
 	DOREPLIFETIME_ACTIVE_OVERRIDE_PRIVATE_PROPERTY(USceneComponent, RelativeLocation, bReplicateMovement);
 	DOREPLIFETIME_ACTIVE_OVERRIDE_PRIVATE_PROPERTY(USceneComponent, RelativeRotation, bReplicateMovement);
@@ -56,11 +62,14 @@ bool UGrippableSphereComponent::ReplicateSubobjects(UActorChannel* Channel, clas
 {
 	bool WroteSomething = Super::ReplicateSubobjects(Channel, Bunch, RepFlags);
 
-	for (UVRGripScriptBase* Script : GripLogicScripts)
+	if (bReplicateGripScripts)
 	{
-		if (Script && !Script->IsPendingKill())
+		for (UVRGripScriptBase* Script : GripLogicScripts)
 		{
-			WroteSomething |= Channel->ReplicateSubobject(Script, *Bunch, *RepFlags);
+			if (Script && IsValid(Script))
+			{
+				WroteSomething |= Channel->ReplicateSubobject(Script, *Bunch, *RepFlags);
+			}
 		}
 	}
 
@@ -259,7 +268,7 @@ void UGrippableSphereComponent::PreDestroyFromReplication()
 		if (UObject *SubObject = GripLogicScripts[i])
 		{
 			SubObject->PreDestroyFromReplication();
-			SubObject->MarkPendingKill();
+			SubObject->MarkAsGarbage();
 		}
 	}
 
@@ -268,11 +277,14 @@ void UGrippableSphereComponent::PreDestroyFromReplication()
 
 void UGrippableSphereComponent::GetSubobjectsWithStableNamesForNetworking(TArray<UObject*> &ObjList)
 {
-	for (int32 i = 0; i < GripLogicScripts.Num(); ++i)
+	if (bReplicateGripScripts)
 	{
-		if (UObject *SubObject = GripLogicScripts[i])
+		for (int32 i = 0; i < GripLogicScripts.Num(); ++i)
 		{
-			ObjList.Add(SubObject);
+			if (UObject* SubObject = GripLogicScripts[i])
+			{
+				ObjList.Add(SubObject);
+			}
 		}
 	}
 }
@@ -296,7 +308,7 @@ void UGrippableSphereComponent::OnComponentDestroyed(bool bDestroyingHierarchy)
 	{
 		if (UObject *SubObject = GripLogicScripts[i])
 		{
-			SubObject->MarkPendingKill();
+			SubObject->MarkAsGarbage();
 		}
 	}
 
