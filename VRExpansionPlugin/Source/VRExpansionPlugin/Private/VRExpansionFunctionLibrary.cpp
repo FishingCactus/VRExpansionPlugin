@@ -41,15 +41,6 @@ UGameViewportClient* UVRExpansionFunctionLibrary::GetGameViewportClient(UObject*
 	return nullptr;
 }
 
-{
-	if (WorldContextObject)
-	{
-		return WorldContextObject->GetWorld()->GetGameViewport();
-	}
-
-	return nullptr;
-}
-
 void UVRExpansionFunctionLibrary::SetActorsIgnoreAllCollision(UObject* WorldContextObject, AActor* Actor1, AActor* Actor2, bool bIgnoreCollision)
 {
 	TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents1;
