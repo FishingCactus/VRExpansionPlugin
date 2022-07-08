@@ -72,7 +72,9 @@ public class VRExpansionPlugin : ModuleRules
                     "AIModule",
                     "AnimGraphRuntime",
                     "SwarmsBase",
-                    "ModularGameplayActors"
+                    "ModularGameplayActors",
+                    "GameplayAbilities",
+                    "GameBaseFramework"
 
                     //"Renderer",
                     //"UtilityShaders"
