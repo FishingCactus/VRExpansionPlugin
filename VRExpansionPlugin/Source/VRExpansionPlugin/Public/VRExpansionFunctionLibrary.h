@@ -5,6 +5,9 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "VRBPDatatypes.h"
 #include "XRMotionControllerBase.h" // for GetHandEnumForSourceName()
+
+#include <GameplayTagContainer.h>
+
 #include "VRExpansionFunctionLibrary.generated.h"
 
 class USplineComponent;
