@@ -98,15 +98,15 @@ public:
 	TArray<FVector> Samples;
 
 	UPROPERTY(BlueprintReadWrite, VisibleAnywhere, Category = "VRGesture")
-	FBox GestureSize;
+    FBox GestureSize;
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "VRGesture")
 		FVRGestureSettings GestureSettings;
 
-	FVRGesture()
+	FVRGesture() :
+	    GestureSize( EForceInit::ForceInit )
 	{
 		GestureType = 0;
-		GestureSize = FBox();
 	}
 
 	void CalculateSizeOfGesture(bool bAllowResizing = false, float TargetExtentSize = 1.f)
