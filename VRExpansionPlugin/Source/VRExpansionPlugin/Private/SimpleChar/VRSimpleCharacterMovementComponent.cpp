@@ -25,6 +25,7 @@
 #include "Components/BrushComponent.h"
 //#include "Components/DestructibleComponent.h"
 
+#include "IXRTrackingSystem.h"
 #include "Engine/DemoNetDriver.h"
 #include "Engine/NetworkObjectList.h"
 
