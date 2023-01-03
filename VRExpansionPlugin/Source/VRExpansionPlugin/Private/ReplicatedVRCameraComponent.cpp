@@ -12,44 +12,6 @@
 #include "IHeadMountedDisplay.h"
 
 
-// CTPEEPEE's workaround until epic fixes their function
-// This doesn't fix some of the other areas that use this for XR but it at least gets the
-// view correct in the preview
-// #TODO: REMOVE ASAP when epic fixes it
-bool TMP_IsHeadTrackingAllowedForWorld(IXRTrackingSystem* XRSystem, UWorld* World)
-{
-#if WITH_EDITOR
-	if (GIsEditor)
-	{
-		UEditorEngine* EdEngine = Cast<UEditorEngine>(GEngine);
-		TOptional<FPlayInEditorSessionInfo> PlayInEditorSessionInfo = EdEngine->GetPlayInEditorSessionInfo();
-		
-		check(PlayInEditorSessionInfo.IsSet())
-			FRequestPlaySessionParams RequestPlaySessionParams = PlayInEditorSessionInfo.GetValue().OriginalRequestParams;
-		ULevelEditorPlaySettings* PlaySettings = RequestPlaySessionParams.EditorPlaySettings;
-		check(PlaySettings);
-
-		// Not loading under a single process, we'll depend on the end user to handle it here to initialize the correct HMD setup
-		const bool bRunUnderOneProcess = [&PlaySettings] { bool RunUnderOneProcess(false); return (PlaySettings->GetRunUnderOneProcess(RunUnderOneProcess) && RunUnderOneProcess); }();
-		if (!bRunUnderOneProcess)
-		{
-			return XRSystem->IsHeadTrackingAllowedForWorld(*World);
-		}
-
-		int32 NumClients = 0;
-		PlaySettings->GetPlayNumberOfClients(NumClients);
-		EPlayNetMode PlayNetMode;
-		PlaySettings->GetPlayNetMode(PlayNetMode);
-		int32 AllowedPIEInstanceID = PlayNetMode == PIE_Client ? 1 : 0;
-		// If join a server when PIEInstanceID will be index none. just gonna assume that's fine. might actually be issues if you have two clients when you join a server...
-		int32 PIEInstanceID = World->GetOutermost()->GetPIEInstanceID();
-		return XRSystem->IsHeadTrackingAllowed() && ((World->WorldType != EWorldType::PIE) || (World->GetOutermost()->GetPIEInstanceID() == AllowedPIEInstanceID) || World->GetOutermost()->GetPIEInstanceID() == INDEX_NONE);
-	}
-#endif
-	return XRSystem->IsHeadTrackingAllowedForWorld(*World);
-}
-
-
 UReplicatedVRCameraComponent::UReplicatedVRCameraComponent(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
@@ -67,7 +29,16 @@ UReplicatedVRCameraComponent::UReplicatedVRCameraComponent(const FObjectInitiali
 
 	bUsePawnControlRotation = false;
 	bAutoSetLockToHmd = true;
+	bScaleTracking = false;
+	TrackingScaler = FVector(1.0f);
 	bOffsetByHMD = false;
+	bLimitMinHeight = false;
+	MinimumHeightAllowed = 0.0f;
+	bLimitMaxHeight = false;
+	MaxHeightAllowed = 300.f;
+	bLimitBounds = false;
+	// Just shy of 20' distance from the center of tracked space
+	MaximumTrackedBounds = 1028;
 
 	bSetPositionDuringTick = false;
 	bSmoothReplicatedMotion = false;
@@ -167,6 +138,41 @@ void UReplicatedVRCameraComponent::OnAttachmentChanged()
 	Super::OnAttachmentChanged();
 }
 
+bool UReplicatedVRCameraComponent::HasTrackingParameters()
+{
+	return bOffsetByHMD || bScaleTracking || bLimitMaxHeight || bLimitMinHeight || bLimitBounds;
+}
+
+void UReplicatedVRCameraComponent::ApplyTrackingParameters(FVector &OriginalPosition)
+{
+	if (bOffsetByHMD)
+	{
+		OriginalPosition.X = 0;
+		OriginalPosition.Y = 0;
+	}
+
+	if (bLimitBounds)
+	{
+		OriginalPosition.X = FMath::Clamp(OriginalPosition.X, -MaximumTrackedBounds, MaximumTrackedBounds);
+		OriginalPosition.Y = FMath::Clamp(OriginalPosition.Y, -MaximumTrackedBounds, MaximumTrackedBounds);
+	}
+
+	if (bScaleTracking)
+	{
+		OriginalPosition *= TrackingScaler;
+	}
+
+	if (bLimitMaxHeight)
+	{
+		OriginalPosition.Z = FMath::Min(MaxHeightAllowed, OriginalPosition.Z);
+	}
+
+	if (bLimitMinHeight)
+	{
+		OriginalPosition.Z = FMath::Max(MinimumHeightAllowed, OriginalPosition.Z);
+	}
+}
+
 void UReplicatedVRCameraComponent::UpdateTracking(float DeltaTime)
 {
 	bHasAuthority = IsLocallyControlled();
@@ -182,10 +188,9 @@ void UReplicatedVRCameraComponent::UpdateTracking(float DeltaTime)
 			FVector Position;
 			if (GEngine->XRSystem->GetCurrentPose(IXRTrackingSystem::HMDDeviceId, Orientation, Position))
 			{
-				if (bOffsetByHMD)
+				if (HasTrackingParameters())
 				{
-					Position.X = 0;
-					Position.Y = 0;
+					ApplyTrackingParameters(Position);
 				}
 
 				SetRelativeTransform(FTransform(Orientation, Position));
@@ -201,22 +206,35 @@ void UReplicatedVRCameraComponent::UpdateTracking(float DeltaTime)
 
 			if (LerpVal >= 1.0f)
 			{
-				SetRelativeLocationAndRotation(ReplicatedCameraTransform.Position, ReplicatedCameraTransform.Rotation);
+				SetRelativeLocationAndRotation(MotionSampleUpdateBuffer[0].Position, MotionSampleUpdateBuffer[0].Rotation);
 
-				// Stop lerping, wait for next update if it is delayed or lost then it will hitch here
-				// Actual prediction might be something to consider in the future, but rough to do in VR
-				// considering the speed and accuracy of movements
-				// would like to consider sub stepping but since there is no server rollback...not sure how useful it would be
-				// and might be perf taxing enough to not make it worth it.
-				bLerpingPosition = false;
-				NetUpdateCount = 0.0f;
+				static const auto CVarDoubleBufferTrackedDevices = IConsoleManager::Get().FindConsoleVariable(TEXT("vr.DoubleBufferReplicatedTrackedDevices"));
+				if (CVarDoubleBufferTrackedDevices->GetBool())
+				{
+					LastUpdatesRelativePosition = this->GetRelativeLocation();
+					LastUpdatesRelativeRotation = this->GetRelativeRotation();
+					NetUpdateCount = 0.0f;
+
+					// Move to next sample, we are catching up
+					MotionSampleUpdateBuffer[0] = MotionSampleUpdateBuffer[1];
+				}
+				else
+				{
+					// Stop lerping, wait for next update if it is delayed or lost then it will hitch here
+					// Actual prediction might be something to consider in the future, but rough to do in VR
+					// considering the speed and accuracy of movements
+					// would like to consider sub stepping but since there is no server rollback...not sure how useful it would be
+					// and might be perf taxing enough to not make it worth it.
+					bLerpingPosition = false;
+					NetUpdateCount = 0.0f;
+				}
 			}
 			else
 			{
 				// Removed variables to speed this up a bit
 				SetRelativeLocationAndRotation(
-					FMath::Lerp(LastUpdatesRelativePosition, (FVector)ReplicatedCameraTransform.Position, LerpVal),
-					FMath::Lerp(LastUpdatesRelativeRotation, ReplicatedCameraTransform.Rotation, LerpVal)
+					FMath::Lerp(LastUpdatesRelativePosition, (FVector)MotionSampleUpdateBuffer[0].Position, LerpVal),
+					FMath::Lerp(LastUpdatesRelativeRotation, MotionSampleUpdateBuffer[0].Rotation, LerpVal)
 				);
 			}
 		}
@@ -292,7 +310,7 @@ void UReplicatedVRCameraComponent::TickComponent(float DeltaTime, enum ELevelTic
 	}
 }
 
-void UReplicatedVRCameraComponent::GetCameraView(float DeltaTime, FMinimalViewInfo& DesiredView)
+void UReplicatedVRCameraComponent::HandleXRCamera()
 {
 	bool bIsLocallyControlled = IsLocallyControlled();
 
@@ -311,22 +329,20 @@ void UReplicatedVRCameraComponent::GetCameraView(float DeltaTime, FMinimalViewIn
 
 		if (XRCamera.IsValid())
 		{
-			//if (XRSystem->IsHeadTrackingAllowedForWorld(*GetWorld()))
-			if (TMP_IsHeadTrackingAllowedForWorld(XRSystem, GetWorld()))
+			if (XRSystem->IsHeadTrackingAllowedForWorld(*GetWorld()))
 			{
 				const FTransform ParentWorld = CalcNewComponentToWorld(FTransform());
 				XRCamera->SetupLateUpdate(ParentWorld, this, bLockToHmd == 0);
-				
+
 				if (bLockToHmd)
 				{
 					FQuat Orientation;
 					FVector Position;
 					if (XRCamera->UpdatePlayerCamera(Orientation, Position))
 					{
-						if (bOffsetByHMD)
+						if (HasTrackingParameters())
 						{
-							Position.X = 0;
-							Position.Y = 0;
+							ApplyTrackingParameters(Position);
 						}
 
 						SetRelativeTransform(FTransform(Orientation, Position));
@@ -345,52 +361,4 @@ void UReplicatedVRCameraComponent::GetCameraView(float DeltaTime, FMinimalViewIn
 			}
 		}
 	}
-
-	if (bUsePawnControlRotation)
-	{
-		const APawn* OwningPawn = Cast<APawn>(GetOwner());
-		const AController* OwningController = OwningPawn ? OwningPawn->GetController() : nullptr;
-		if (OwningController && OwningController->IsLocalPlayerController())
-		{
-			const FRotator PawnViewRotation = OwningPawn->GetViewRotation();
-			if (!PawnViewRotation.Equals(GetComponentRotation()))
-			{
-				SetWorldRotation(PawnViewRotation);
-			}
-		}
-	}
-
-	if (bUseAdditiveOffset)
-	{
-		FTransform OffsetCamToBaseCam = AdditiveOffset;
-		FTransform BaseCamToWorld = GetComponentToWorld();
-		FTransform OffsetCamToWorld = OffsetCamToBaseCam * BaseCamToWorld;
-
-		DesiredView.Location = OffsetCamToWorld.GetLocation();
-		DesiredView.Rotation = OffsetCamToWorld.Rotator();
-	}
-	else
-	{
-		DesiredView.Location = GetComponentLocation();
-		DesiredView.Rotation = GetComponentRotation();
-	}
-
-	DesiredView.FOV = bUseAdditiveOffset ? (FieldOfView + AdditiveFOVOffset) : FieldOfView;
-	DesiredView.AspectRatio = AspectRatio;
-	DesiredView.bConstrainAspectRatio = bConstrainAspectRatio;
-	DesiredView.bUseFieldOfViewForLOD = bUseFieldOfViewForLOD;
-	DesiredView.ProjectionMode = ProjectionMode;
-	DesiredView.OrthoWidth = OrthoWidth;
-	DesiredView.OrthoNearClipPlane = OrthoNearClipPlane;
-	DesiredView.OrthoFarClipPlane = OrthoFarClipPlane;
-
-	// See if the CameraActor wants to override the PostProcess settings used.
-	DesiredView.PostProcessBlendWeight = PostProcessBlendWeight;
-	if (PostProcessBlendWeight > 0.0f)
-	{
-		DesiredView.PostProcessSettings = PostProcessSettings;
-	}
-
-	// If this camera component has a motion vector simumlation transform, use that for the current view's previous transform
-	DesiredView.PreviousViewTransform = FMotionVectorSimulation::Get().GetPreviousTransform(this);
 }

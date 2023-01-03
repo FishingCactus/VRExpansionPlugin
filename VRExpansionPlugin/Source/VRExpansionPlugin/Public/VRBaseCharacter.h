@@ -6,10 +6,6 @@
 #include "VRBaseCharacterMovementComponent.h"
 #include "ReplicatedVRCameraComponent.h"
 #include "GameFramework/Character.h"
-#include "GameFramework/Controller.h"
-#include "Components/CapsuleComponent.h"
-
-#include "SwarmsBase/Characters/SWCharacterPlayerBase.h"
 #include "Navigation/PathFollowingComponent.h"
 #include "VRBaseCharacter.generated.h"
 
@@ -270,7 +266,7 @@ struct TStructOpsTypeTraits< FVRReplicatedCapsuleHeight > : public TStructOpsTyp
 };
 
 UCLASS()
-class VREXPANSIONPLUGIN_API AVRBaseCharacter : public ASWCharacterPlayerBase
+class VREXPANSIONPLUGIN_API AVRBaseCharacter : public ACharacter
 {
 	GENERATED_BODY()
 
@@ -501,6 +497,10 @@ public:
 	// Sets the actors rotation and location taking into account the HMD as a pivot point (also moves the actor), returns the location difference from the rotation
 	UFUNCTION(BlueprintCallable, Category = "BaseVRCharacter|VRLocations")
 		FVector SetActorLocationAndRotationVR(FVector NewLoc, FRotator NewRot, bool bUseYawOnly = true, bool bAccountForHMDRotation = true, bool bTeleport = false);
+
+	// Sets the actors location taking into account the HMD as a pivot point, returns the location difference
+	UFUNCTION(BlueprintCallable, Category = "BaseVRCharacter|VRLocations")
+		FVector SetActorLocationVR(FVector NewLoc, bool bTeleport);
 
 	// Regenerates the base offsetcomponenttoworld that VR uses
 	UFUNCTION(BlueprintCallable, Category = "BaseVRCharacter|VRLocations")

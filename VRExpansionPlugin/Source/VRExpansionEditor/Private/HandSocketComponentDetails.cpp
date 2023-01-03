@@ -16,7 +16,7 @@
 #include "Editor/ContentBrowser/Public/IContentBrowserSingleton.h"
 #include "Editor/ContentBrowser/Public/ContentBrowserModule.h"
 #include "AnimationUtils.h"
-#include "AssetRegistryModule.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "UObject/SavePackage.h"
 #include "Misc/MessageDialog.h"
 #include "Widgets/Layout/SBorder.h"
@@ -169,7 +169,8 @@ TWeakObjectPtr<UAnimSequence> FHandSocketComponentDetails::SaveAnimationAsset(co
 			}
 			else
 			{
-				for (int i = 0; i < LocalPoses.Num(); i++)
+				int numBones = HandSocketComponent->VisualizationMesh->GetRefSkeleton().GetNum();
+				for (int i = 0; i < LocalPoses.Num() && i < numBones; ++i)
 				{
 					AnimController.AddBoneTrack(HandSocketComponent->VisualizationMesh->GetRefSkeleton().GetBoneName(i));
 				}
@@ -293,12 +294,12 @@ TWeakObjectPtr<UAnimSequence> FHandSocketComponentDetails::SaveAnimationAsset(co
 		/// 
 
 		// init notifies
-
 		AnimationObject->InitializeNotifyTrack();
-		PRAGMA_DISABLE_DEPRECATION_WARNINGS
-			AnimationObject->PostProcessSequence();
-		PRAGMA_ENABLE_DEPRECATION_WARNINGS
-			AnimationObject->MarkPackageDirty();
+		//#TODO: 5.1, need to figure out what they replaced this with
+		//PRAGMA_DISABLE_DEPRECATION_WARNINGS
+			//AnimationObject->PostProcessSequence();
+		//PRAGMA_ENABLE_DEPRECATION_WARNINGS
+		AnimationObject->MarkPackageDirty();
 
 		//if (bAutoSaveAsset)
 		{
@@ -424,8 +425,10 @@ void FHandSocketComponentDetails::OnLockedStateUpdated(IDetailLayoutBuilder* Lay
 			{
 				Owner->Modify();
 			}
+
 			HandSocketComponent->HandRelativePlacement = HandSocketComponent->HandRelativePlacement * HandSocketComponent->GetRelativeTransform();// HandSocketComponent->GetComponentTransform();
-			
+			HandSocketComponent->bDecoupled = true;
+
 			TSharedPtr<FComponentVisualizer> Visualizer = GUnrealEd->FindComponentVisualizer(HandSocketComponent->GetClass());
 			FHandSocketVisualizer* HandVisualizer = (FHandSocketVisualizer*)Visualizer.Get();
 
@@ -434,6 +437,7 @@ void FHandSocketComponentDetails::OnLockedStateUpdated(IDetailLayoutBuilder* Lay
 				if (UHandSocketComponent* RefHand = HandVisualizer->GetCurrentlyEditingComponent())
 				{
 					RefHand->HandRelativePlacement = HandSocketComponent->HandRelativePlacement;
+					RefHand->bDecoupled = true;
 					//FComponentVisualizer::NotifyPropertyModified(RefHand, FindFProperty<FProperty>(UHandSocketComponent::StaticClass(), GET_MEMBER_NAME_CHECKED(UHandSocketComponent, HandRelativePlacement)));
 				}
 			}
@@ -449,6 +453,7 @@ void FHandSocketComponentDetails::OnLockedStateUpdated(IDetailLayoutBuilder* Lay
 				Owner->Modify();
 			}
 			HandSocketComponent->HandRelativePlacement = HandSocketComponent->HandRelativePlacement.GetRelativeTransform(HandSocketComponent->GetRelativeTransform());
+			HandSocketComponent->bDecoupled = false;
 			
 			TSharedPtr<FComponentVisualizer> Visualizer = GUnrealEd->FindComponentVisualizer(HandSocketComponent->GetClass());
 			FHandSocketVisualizer* HandVisualizer = (FHandSocketVisualizer*)Visualizer.Get();
@@ -458,13 +463,17 @@ void FHandSocketComponentDetails::OnLockedStateUpdated(IDetailLayoutBuilder* Lay
 				if (UHandSocketComponent* RefHand = HandVisualizer->GetCurrentlyEditingComponent())
 				{
 					RefHand->HandRelativePlacement = HandSocketComponent->HandRelativePlacement;
+					RefHand->bDecoupled = false;
 					//FComponentVisualizer::NotifyPropertyModified(RefHand, FindFProperty<FProperty>(UHandSocketComponent::StaticClass(), GET_MEMBER_NAME_CHECKED(UHandSocketComponent, HandRelativePlacement)));
 				}
 			}
 		}
 	}
 
-	FComponentVisualizer::NotifyPropertyModified(HandSocketComponent.Get(), FindFProperty<FProperty>(UHandSocketComponent::StaticClass(), GET_MEMBER_NAME_CHECKED(UHandSocketComponent, HandRelativePlacement)));
+	TArray<FProperty*> PropertiesToModify;
+	PropertiesToModify.Add(FindFProperty<FProperty>(UHandSocketComponent::StaticClass(), GET_MEMBER_NAME_CHECKED(UHandSocketComponent, HandRelativePlacement)));
+	PropertiesToModify.Add(FindFProperty<FProperty>(UHandSocketComponent::StaticClass(), GET_MEMBER_NAME_CHECKED(UHandSocketComponent, bDecoupled)));
+	FComponentVisualizer::NotifyPropertiesModified(HandSocketComponent.Get(), PropertiesToModify);
 }
 
 void FHandSocketComponentDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
@@ -705,7 +714,7 @@ void SCreateHandAnimationDlg::Construct(const FArguments& InArgs)
 		.Padding(2)
 		[
 			SNew(SBorder)
-			.BorderImage(FEditorStyle::GetBrush("ToolPanel.GroupBorder"))
+			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
 		[
 			SNew(SVerticalBox)
 
@@ -762,14 +771,14 @@ void SCreateHandAnimationDlg::Construct(const FArguments& InArgs)
 		.Padding(5)
 		[
 			SNew(SUniformGridPanel)
-			.SlotPadding(FEditorStyle::GetMargin("StandardDialog.SlotPadding"))
-		.MinDesiredSlotWidth(FEditorStyle::GetFloat("StandardDialog.MinDesiredSlotWidth"))
-		.MinDesiredSlotHeight(FEditorStyle::GetFloat("StandardDialog.MinDesiredSlotHeight"))
+			.SlotPadding(FAppStyle::GetMargin("StandardDialog.SlotPadding"))
+		.MinDesiredSlotWidth(FAppStyle::GetFloat("StandardDialog.MinDesiredSlotWidth"))
+		.MinDesiredSlotHeight(FAppStyle::GetFloat("StandardDialog.MinDesiredSlotHeight"))
 		+ SUniformGridPanel::Slot(0, 0)
 		[
 			SNew(SButton)
 			.HAlign(HAlign_Center)
-		.ContentPadding(FEditorStyle::GetMargin("StandardDialog.ContentPadding"))
+		.ContentPadding(FAppStyle::GetMargin("StandardDialog.ContentPadding"))
 		.Text(LOCTEXT("OK", "OK"))
 		.OnClicked(this, &SCreateHandAnimationDlg::OnButtonClick, EAppReturnType::Ok)
 		]
@@ -777,7 +786,7 @@ void SCreateHandAnimationDlg::Construct(const FArguments& InArgs)
 		[
 			SNew(SButton)
 			.HAlign(HAlign_Center)
-		.ContentPadding(FEditorStyle::GetMargin("StandardDialog.ContentPadding"))
+		.ContentPadding(FAppStyle::GetMargin("StandardDialog.ContentPadding"))
 		.Text(LOCTEXT("Cancel", "Cancel"))
 		.OnClicked(this, &SCreateHandAnimationDlg::OnButtonClick, EAppReturnType::Cancel)
 		]

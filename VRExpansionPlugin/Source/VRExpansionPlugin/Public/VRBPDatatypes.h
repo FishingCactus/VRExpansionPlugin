@@ -7,8 +7,9 @@
 //#include "EngineMinimal.h"
 //#include "Components/PrimitiveComponent.h"
 
-//#include "PhysicsPublic.h"
+#include "PhysicsEngine/ConstraintTypes.h"
 #include "PhysicsEngine/ConstraintDrives.h"
+#include "Physics/PhysicsInterfaceCore.h"
 #include "VRBPDatatypes.generated.h"
 
 class UGripMotionControllerComponent;
@@ -76,6 +77,20 @@ enum class EBPVRResultSwitch : uint8
 	OnSucceeded,
 	// On Failure
 	OnFailed
+};
+
+// Which method of handling gripping conflict to take with client auth
+UENUM(BlueprintType)
+enum class EVRClientAuthConflictResolutionMode : uint8
+{
+	// Do nothing
+	VRGRIP_CONFLICT_None,
+	// Give to the first to arrive
+	VRGRIP_CONFLICT_First,
+	// Give to the last to arrive
+	VRGRIP_CONFLICT_Last,
+	// Force all ends to drop their grip
+	VRGRIP_CONFLICT_DropAll
 };
 
 // Wasn't needed when final setup was realized
@@ -473,7 +488,7 @@ namespace TransNetQuant
 	static const float MinMaxQDiff = TransNetQuant::MaximumQ - TransNetQuant::MinimumQ;
 }
 
-USTRUCT(/*noexport, */BlueprintType, Category = "VRExpansionLibrary|TransformNetQuantize", meta = (HasNativeMake = "VRExpansionPlugin.VRExpansionFunctionLibrary.MakeTransform_NetQuantize", HasNativeBreak = "VRExpansionPlugin.VRExpansionFunctionLibrary.BreakTransform_NetQuantize"))
+USTRUCT(/*noexport, */BlueprintType, Category = "VRExpansionLibrary|TransformNetQuantize", meta = (HasNativeMake = "/Script/VRExpansionPlugin.VRExpansionFunctionLibrary.MakeTransform_NetQuantize", HasNativeBreak = "/Script/VRExpansionPlugin.VRExpansionFunctionLibrary.BreakTransform_NetQuantize"))
 struct FTransform_NetQuantize : public FTransform
 {
 	GENERATED_USTRUCT_BODY()
@@ -1081,15 +1096,15 @@ public:
 		bool bSkipSettingSimulating;
 
 	// A multiplier to add to the stiffness of a grip that is then set as the MaxForce of the grip
-	// It is clamped between 0.00 and 256.00 to save in replication cost, a value of 0 will mean max force is infinite as it will multiply it to zero (legacy behavior)
+	// It is clamped between 0.00 and 512.00 to save in replication cost, a value of 0 will mean max force is infinite as it will multiply it to zero (legacy behavior)
 	// If you want an exact value you can figure it out as a factor of the stiffness, also Max force can be directly edited with SetAdvancedConstraintSettings
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsSettings", meta = (editcondition = "bUsePhysicsSettings"), meta = (ClampMin = "0.00", UIMin = "0.00", ClampMax = "256.00", UIMax = "256.00"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsSettings", meta = (editcondition = "bUsePhysicsSettings"), meta = (ClampMin = "0.00", UIMin = "0.00", ClampMax = "512.00", UIMax = "512.00"))
 		float LinearMaxForceCoefficient;
 
 	// A multiplier to add to the stiffness of a grip that is then set as the MaxForce of the grip
-	// It is clamped between 0.00 and 256.00 to save in replication cost, a value of 0 will mean max force is infinite as it will multiply it to zero (legacy behavior)
+	// It is clamped between 0.00 and 512.00 to save in replication cost, a value of 0 will mean max force is infinite as it will multiply it to zero (legacy behavior)
 	// If you want an exact value you can figure it out as a factor of the stiffness, also Max force can be directly edited with SetAdvancedConstraintSettings
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsSettings", meta = (editcondition = "bUsePhysicsSettings"), meta = (ClampMin = "0.00", UIMin = "0.00", ClampMax = "256.00", UIMax = "256.00"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PhysicsSettings", meta = (editcondition = "bUsePhysicsSettings"), meta = (ClampMin = "0.00", UIMin = "0.00", ClampMax = "512.00", UIMax = "512.00"))
 		float AngularMaxForceCoefficient;
 
 	// Use the custom angular values on this grip
@@ -1167,16 +1182,16 @@ public:
 			Ar.SerializeBits(&bSkipSettingSimulating, 1);
 
 
-			// This is 0.0 - 256.0, using compression to get it smaller, 8 bits = max 256 + 1 bit for sign and 7 bits precision for 128 / full 2 digit precision
+			// This is 0.0 - 512.0, using compression to get it smaller, 8 bits = max 256 + 1 bit for sign and 7 bits precision for 128 / full 2 digit precision
 			if (Ar.IsSaving())
 			{
-				bOutSuccess &= WriteFixedCompressedFloat<256, 16>(LinearMaxForceCoefficient, Ar);
-				bOutSuccess &= WriteFixedCompressedFloat<256, 16>(AngularMaxForceCoefficient, Ar);
+				bOutSuccess &= WriteFixedCompressedFloat<512, 17>(LinearMaxForceCoefficient, Ar);
+				bOutSuccess &= WriteFixedCompressedFloat<512, 17>(AngularMaxForceCoefficient, Ar);
 			}
 			else
 			{
-				bOutSuccess &= ReadFixedCompressedFloat<256, 16>(LinearMaxForceCoefficient, Ar);
-				bOutSuccess &= ReadFixedCompressedFloat<256, 16>(AngularMaxForceCoefficient, Ar);
+				bOutSuccess &= ReadFixedCompressedFloat<512, 17>(LinearMaxForceCoefficient, Ar);
+				bOutSuccess &= ReadFixedCompressedFloat<512, 17>(AngularMaxForceCoefficient, Ar);
 			}
 
 
@@ -1439,6 +1454,7 @@ public:
 	
 	// For delta teleport and any future calculations we want to do
 	FTransform LastWorldTransform;
+	bool bSetLastWorldTransform;
 
 	// Need to skip one frame of length check post teleport with constrained objects, the constraint may have not been updated yet.
 	bool bSkipNextTeleportCheck;
@@ -1457,6 +1473,18 @@ public:
 	bool IsLocalAuthGrip()
 	{
 		return GripMovementReplicationSetting == EGripMovementReplicationSettings::ClientSide_Authoritive || GripMovementReplicationSetting == EGripMovementReplicationSettings::ClientSide_Authoritive_NoRep;
+	}
+
+	// If the grip is valid
+	bool IsValid() const
+	{
+		return (!bIsPendingKill && GripID != INVALID_VRGRIP_ID && GrippedObject && IsValidChecked(GrippedObject));
+	}
+
+	// Both valid and is not paused
+	bool IsActive() const
+	{
+		return (!bIsPendingKill && GripID != INVALID_VRGRIP_ID && GrippedObject && IsValidChecked(GrippedObject) && !bIsPaused);
 	}
 
 	// Cached values - since not using a full serialize now the old array state may not contain what i need to diff
@@ -1480,6 +1508,7 @@ public:
 		bIsLocked = false;
 		LastLockedRotation = FQuat::Identity;
 		LastWorldTransform.SetIdentity();
+		bSetLastWorldTransform = false;
 		bSkipNextTeleportCheck = false;
 		bSkipNextConstraintLengthCheck = false;
 		bIsPaused = false;
@@ -1599,6 +1628,7 @@ public:
 		bIsLocked(false),
 		LastLockedRotation(FRotator::ZeroRotator),
 		LastWorldTransform(FTransform::Identity),
+		bSetLastWorldTransform(false),
 		bSkipNextTeleportCheck(false),
 		bSkipNextConstraintLengthCheck(false),
 		CurrentLerpTime(0.f),
@@ -1750,6 +1780,7 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Settings")
 		TObjectPtr<UObject> HandledObject;
 	uint8 GripID;
+	bool bIsPaused;
 
 	FPhysicsActorHandle KinActorData2;
 	FPhysicsConstraintHandle HandleData2;
@@ -1762,8 +1793,8 @@ public:
 
 	bool bSetCOM;
 	bool bSkipResettingCom;
-	bool bSkipMassCheck;
 	bool bSkipDeletingKinematicActor;
+	bool bInitiallySetup;
 
 	FBPActorPhysicsHandleInformation()
 	{	
@@ -1771,14 +1802,13 @@ public:
 		LastPhysicsTransform = FTransform::Identity;
 		COMPosition = FTransform::Identity;
 		GripID = INVALID_VRGRIP_ID;
+		bIsPaused = false;
 		RootBoneRotation = FTransform::Identity;
 		bSetCOM = false;
 		bSkipResettingCom = false;
-		bSkipMassCheck = false;
 		bSkipDeletingKinematicActor = false;
-#if WITH_CHAOS
+		bInitiallySetup = false;
 		KinActorData2 = nullptr;
-#endif
 	}
 
 	FORCEINLINE bool operator==(const FBPActorGripInformation & Other) const

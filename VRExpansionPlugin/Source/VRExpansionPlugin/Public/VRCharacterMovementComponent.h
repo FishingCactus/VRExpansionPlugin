@@ -56,8 +56,12 @@ public:
 	virtual bool IsWithinEdgeTolerance(const FVector& CapsuleLocation, const FVector& TestImpactPoint, const float CapsuleRadius) const override;
 
 	// Allow merging movement replication (may cause issues when >10 players due to capsule location
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VRCharacterMovementComponent")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "VRCharacterMovementComponent")
 	bool bAllowMovementMerging;
+
+	// If true we will run client corrections off of the HMD location instead of actor, this is a settable value to allow backwards compatibility
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "VRCharacterMovementComponent")
+	bool bRunClientCorrectionToHMD;
 
 	// Higher values will cause more slide but better step up
 	//UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VRCharacterMovementComponent", meta = (ClampMin = "0.01", UIMin = "0", ClampMax = "1.0", UIMax = "1"))
@@ -173,6 +177,8 @@ public:
 	 */
 	UVRCharacterMovementComponent(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
+	virtual void OnRegister() override;
+
 	float ImmersionDepth() const override;
 	bool CanCrouch();
 
@@ -275,7 +281,6 @@ public:
 
 	// Making sure that impulses are correct
 	virtual void CapsuleTouched(UPrimitiveComponent* OverlappedComp, AActor* Other, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult) override;
-
 	virtual void StoreSetTrackingPaused(bool bNewTrackingPaused) override;
 };
 
@@ -314,10 +319,10 @@ public:
 class VREXPANSIONPLUGIN_API FNetworkPredictionData_Server_VRCharacter : public FNetworkPredictionData_Server_Character
 {
 public:
+
 	FNetworkPredictionData_Server_VRCharacter(const UCharacterMovementComponent& ClientMovement)
 		: FNetworkPredictionData_Server_Character(ClientMovement)
 	{
-
 	}
 
 	FSavedMovePtr AllocateNewMove()

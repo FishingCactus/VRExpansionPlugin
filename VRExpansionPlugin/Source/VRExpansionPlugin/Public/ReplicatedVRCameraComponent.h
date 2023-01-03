@@ -55,15 +55,53 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ReplicatedCamera")
 	bool bOffsetByHMD;
 
+	// If true will scale the tracking of the camera by TrackingScaler
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ReplicatedCamera|Advanced|Tracking")
+		bool bScaleTracking;
+
+	// A scale to be applied to the tracking of the camera
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ReplicatedCamera|Advanced|Tracking", meta = (ClampMin = "0.1", UIMin = "0.1", EditCondition = "bScaleTracking"))
+		FVector TrackingScaler;
+
+	// If true we will use the minimum height value to clamp the Z too
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ReplicatedCamera|Advanced|Tracking")
+		bool bLimitMinHeight;
+
+	// The minimum height to allow for this camera
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ReplicatedCamera|Advanced|Tracking", meta = (ClampMin = "0.0", UIMin = "0.0", EditCondition = "bLimitMinHeight"))
+		float MinimumHeightAllowed;
+
+	// If true will limit the max Z height that the camera is capable of reaching
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ReplicatedCamera|Advanced|Tracking")
+		bool bLimitMaxHeight;
+
+	// If we are limiting the max height, this is the maximum allowed value
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ReplicatedCamera|Advanced|Tracking", meta = (ClampMin = "0.1", UIMin = "0.1", EditCondition = "bLimitMaxHeight"))
+		float MaxHeightAllowed;
+
+	// If true will limit the maximum offset from center of the players tracked space
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ReplicatedCamera|Advanced|Tracking")
+		bool bLimitBounds;
+
+	// If we are limiting the maximum bounds, this is the maximum length of the vector from the center of the tracked space
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ReplicatedCamera|Advanced|Tracking", meta = (ClampMin = "0.1", UIMin = "0.1", EditCondition = "bLimitMaxHeight"))
+		float MaximumTrackedBounds;
+
 	/** Sets lock to hmd automatically based on if the camera is currently locally controlled or not */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ReplicatedCamera")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "ReplicatedCamera|Advanced|Tracking")
 		uint32 bAutoSetLockToHmd : 1;
 
-	//UFUNCTION(BlueprintCallable, Category = Camera)
-		virtual void GetCameraView(float DeltaTime, FMinimalViewInfo& DesiredView) override;
+	void ApplyTrackingParameters(FVector & OriginalPosition);
+	bool HasTrackingParameters();
+
+	// Get Camera View is no longer required, they finally broke the HMD logic out into its own section!!
+	//virtual void GetCameraView(float DeltaTime, FMinimalViewInfo& DesiredView) override;
+	virtual void HandleXRCamera() override;
 
 	UPROPERTY(EditDefaultsOnly, ReplicatedUsing = OnRep_ReplicatedCameraTransform, Category = "ReplicatedCamera|Networking")
 	FBPVRComponentPosRep ReplicatedCameraTransform;
+
+	FBPVRComponentPosRep MotionSampleUpdateBuffer[2];
 
 	FVector LastUpdatesRelativePosition;
 	FRotator LastUpdatesRelativeRotation;
@@ -78,19 +116,42 @@ public:
 	UFUNCTION()
 	virtual void OnRep_ReplicatedCameraTransform()
 	{
+		if (GetNetMode() < ENetMode::NM_Client && HasTrackingParameters())
+		{
+			// Ensure that we clamp to the expected values from the client
+			ApplyTrackingParameters(ReplicatedCameraTransform.Position);
+		}
+
 		if (bSmoothReplicatedMotion)
 		{
+			static const auto CVarDoubleBufferTrackedDevices = IConsoleManager::Get().FindConsoleVariable(TEXT("vr.DoubleBufferReplicatedTrackedDevices"));
 			if (bReppedOnce)
 			{
 				bLerpingPosition = true;
 				NetUpdateCount = 0.0f;
 				LastUpdatesRelativePosition = this->GetRelativeLocation();
 				LastUpdatesRelativeRotation = this->GetRelativeRotation();
+
+				if (CVarDoubleBufferTrackedDevices->GetBool())
+				{
+					MotionSampleUpdateBuffer[0] = MotionSampleUpdateBuffer[1];
+					MotionSampleUpdateBuffer[1] = ReplicatedCameraTransform;
+				}
+				else
+				{
+					MotionSampleUpdateBuffer[0] = ReplicatedCameraTransform;
+					// Also set the buffered value in case double buffering gets turned on
+					MotionSampleUpdateBuffer[1] = MotionSampleUpdateBuffer[0];
+				}
 			}
 			else
 			{
 				SetRelativeLocationAndRotation(ReplicatedCameraTransform.Position, ReplicatedCameraTransform.Rotation);
 				bReppedOnce = true;
+
+				// Filling the second index in as well in case they turn on double buffering
+				MotionSampleUpdateBuffer[1] = ReplicatedCameraTransform;
+				MotionSampleUpdateBuffer[0] = MotionSampleUpdateBuffer[1];
 			}
 		}
 		else

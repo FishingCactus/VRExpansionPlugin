@@ -9,7 +9,7 @@
 #include "GripMotionControllerComponent.h"
 #include "VRPathFollowingComponent.h"
 #include "Net/UnrealNetwork.h"
-#include "XRMotioncontrollerBase.h"
+#include "XRMotionControllerBase.h"
 //#include "Runtime/Engine/Private/EnginePrivate.h"
 
 DEFINE_LOG_CATEGORY(LogBaseVRCharacter);
@@ -235,8 +235,8 @@ void AVRBaseCharacter::PreReplication(IRepChangedPropertyTracker & ChangedProper
 {
 	Super::PreReplication(ChangedPropertyTracker);
 
-	DOREPLIFETIME_ACTIVE_OVERRIDE(AVRBaseCharacter, ReplicatedCapsuleHeight, VRReplicateCapsuleHeight);
-	DOREPLIFETIME_ACTIVE_OVERRIDE(AVRBaseCharacter, ReplicatedMovementVR, IsReplicatingMovement());
+	DOREPLIFETIME_ACTIVE_OVERRIDE_FAST(AVRBaseCharacter, ReplicatedCapsuleHeight, VRReplicateCapsuleHeight);
+	DOREPLIFETIME_ACTIVE_OVERRIDE_FAST(AVRBaseCharacter, ReplicatedMovementVR, IsReplicatingMovement());
 }
 
 /*USkeletalMeshComponent* AVRBaseCharacter::GetIKMesh_Implementation() const
@@ -881,6 +881,23 @@ FVector AVRBaseCharacter::SetActorLocationAndRotationVR(FVector NewLoc, FRotator
 
 	// Also setting actor rot because the control rot transfers to it anyway eventually
 	SetActorLocationAndRotation(NewLocation, NewRotation, false, nullptr, bTeleport ? ETeleportType::TeleportPhysics : ETeleportType::None);
+	return NewLocation - NewLoc;
+}
+
+FVector AVRBaseCharacter::SetActorLocationVR(FVector NewLoc, bool bTeleport)
+{
+	FVector NewLocation;
+	FRotator NewRotation;
+	FVector PivotOffsetVal = GetVRLocation_Inline() - GetActorLocation();
+	PivotOffsetVal.Z = 0.0f;
+
+
+	NewLocation = NewLoc - PivotOffsetVal;// +PivotPoint;// NewRotation.RotateVector(PivotPoint);
+						 //NewRotation = NewRot;
+
+
+	// Also setting actor rot because the control rot transfers to it anyway eventually
+	SetActorLocation(NewLocation, false, nullptr, bTeleport ? ETeleportType::TeleportPhysics : ETeleportType::None);
 	return NewLocation - NewLoc;
 }
 

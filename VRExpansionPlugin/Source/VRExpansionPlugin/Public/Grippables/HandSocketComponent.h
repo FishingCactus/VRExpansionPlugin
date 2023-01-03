@@ -7,6 +7,7 @@
 #include "GameplayTagAssetInterface.h"
 #include "Components/SceneComponent.h"
 #include "Animation/AnimInstance.h"
+#include "Misc/Guid.h"
 #include "HandSocketComponent.generated.h"
 
 class USkeletalMeshComponent;
@@ -17,6 +18,29 @@ class UAnimSequence;
 struct FPoseSnapshot;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogVRHandSocketComponent, Log, All);
+
+// Custom serialization version for the hand socket component
+struct VREXPANSIONPLUGIN_API FVRHandSocketCustomVersion
+{
+	enum Type
+	{
+		// Before any version changes were made in the plugin
+		BeforeCustomVersionWasAdded = 0,
+
+		// Added a set state tracker to handle in editor construction edge cases
+		HandSocketStoringSetState = 1,
+
+		// -----<new versions can be added above this line>-------------------------------------------------
+		VersionPlusOne,
+		LatestVersion = VersionPlusOne - 1
+	};
+
+	// The GUID for this custom version number
+	const static FGuid GUID;
+
+private:
+	FVRHandSocketCustomVersion() {}
+};
 
 
 UENUM()
@@ -148,6 +172,14 @@ public:
 		FVector MirroredScale;
 
 #if WITH_EDITORONLY_DATA
+	// If true we will attempt to only show editing widgets for bones matching the _l or _r postfixes
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Animation")
+		bool bFilterBonesByPostfix;
+
+	// The postfix to filter by
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Hand Animation")
+		FString FilterPostfix;
+
 	FTransform GetBoneTransformAtTime(UAnimSequence* MyAnimSequence, /*float AnimTime,*/ int BoneIdx, FName BoneName, bool bUseRawDataOnly);
 #endif
 
@@ -294,8 +326,10 @@ public:
 	// Returns the target relative transform of the hand to the gripped object
 	// If you want the transform mirrored you need to pass in which hand is requesting the information
 	// If UseParentScale is true then we will scale the value by the parent scale (generally only for when not using absolute hand scale)
+	// If UseMirrorScale is true then we will mirror the scale on the hand by the hand sockets mirror scale when appropriate (not for fully body!)
+	// if UseMirrorScale is false than the resulting transform will not have mirroring scale added so you may have to break the transform.
 	UFUNCTION(BlueprintCallable, Category = "Hand Socket Data")
-	FTransform GetMeshRelativeTransform(bool bIsRightHand, bool bUseParentScale = false);
+	FTransform GetMeshRelativeTransform(bool bIsRightHand, bool bUseParentScale = false, bool bUseMirrorScale = false);
 
 	// Returns the defined hand socket component (if it exists, you need to valid check the return!
 	// If it is a valid return you can then cast to your projects base socket class and handle whatever logic you want
@@ -312,7 +346,12 @@ public:
 	virtual void OnComponentDestroyed(bool bDestroyingHierarchy) override;
 	void PoseVisualizationToAnimation(bool bForceRefresh = false);
 	bool bTickedPose;
+
+	UPROPERTY()
+	bool bDecoupled;
+
 #endif
+	virtual void Serialize(FArchive& Ar) override;
 	virtual void OnRegister() override;
 	virtual void PreReplication(IRepChangedPropertyTracker& ChangedPropertyTracker) override;
 
@@ -342,9 +381,9 @@ public:
 
 	/** mesh component to indicate hand placement */
 #if WITH_EDITORONLY_DATA
-	//UPROPERTY(EditAnywhere, BlueprintReadOnly, Transient, Category = "Hand Visualization")
-		//class USkeletalMeshComponent* HandVisualizerComponent;
-	class UPoseableMeshComponent* HandVisualizerComponent;
+
+	UPROPERTY()
+		TObjectPtr<UPoseableMeshComponent> HandVisualizerComponent;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Transient, Category = "Hand Visualization")
 		TObjectPtr<USkeletalMesh> VisualizationMesh;
