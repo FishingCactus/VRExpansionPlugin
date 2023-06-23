@@ -1,6 +1,8 @@
 // Copyright 1998-2016 Epic Games, Inc. All Rights Reserved.
 
 #include "VRStereoWidgetComponent.h"
+#include UE_INLINE_GENERATED_CPP_BY_NAME(VRStereoWidgetComponent)
+
 #include "VRExpansionFunctionLibrary.h"
 #include "IXRTrackingSystem.h"
 #include "VRBaseCharacter.h"
@@ -447,7 +449,7 @@ void UVRStereoWidgetComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 
 	//bool bIsCurVis = IsWidgetVisible();
 
-	bool bIsVisible = IsVisible() && IsWidgetVisible() && !bIsSleeping;// && ((GetWorld()->TimeSince(GetLastRenderTime()) <= 0.5f));
+	bool bIsVisible = (bAlwaysVisible && !bIsSleeping)  || (IsVisible() && IsWidgetVisible() && !bIsSleeping);// && ((GetWorld()->TimeSince(GetLastRenderTime()) <= 0.5f));
 
 	// If we are set to not use stereo layers or we don't have a valid stereo layer device
 	if (

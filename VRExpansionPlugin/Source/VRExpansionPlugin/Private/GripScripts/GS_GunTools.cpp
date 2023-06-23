@@ -1,6 +1,8 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "GripScripts/GS_GunTools.h"
+#include UE_INLINE_GENERATED_CPP_BY_NAME(GS_GunTools)
+
 #include "VRGripInterface.h"
 #include "GripMotionControllerComponent.h"
 #include "VRExpansionFunctionLibrary.h"
@@ -190,7 +192,7 @@ bool UGS_GunTools::GetWorldTransform_Implementation
 			float StockSnapDistance = FMath::Square(VirtualStockSettings.StockSnapDistance);
 			float DistSquared = FVector::DistSquared(ParentTransform.GetTranslation(), MountWorldTransform.GetTranslation());
 
-			if (DistSquared <= StockSnapDistance)
+			if (!VirtualStockSettings.bUseDistanceBasedStockSnapping || (DistSquared <= StockSnapDistance))
 			{
 
 				float StockSnapLerpThresh = FMath::Square(VirtualStockSettings.StockSnapLerpThreshold);

@@ -6,6 +6,8 @@
 =============================================================================*/
 
 #include "VRCharacterMovementComponent.h"
+#include UE_INLINE_GENERATED_CPP_BY_NAME(VRCharacterMovementComponent)
+
 #include "GameFramework/PhysicsVolume.h"
 #include "GameFramework/GameNetworkManager.h"
 #include "GameFramework/Character.h"
@@ -197,7 +199,7 @@ void UVRCharacterMovementComponent::Crouch(bool bClientSimulation)
 	CharacterOwner->OnStartCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust);
 
 	// Don't smooth this change in mesh position
-	if (/*(bClientSimulation && CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy) ||*/ (IsNetMode(NM_ListenServer) && CharacterOwner->GetRemoteRole() == ROLE_AutonomousProxy))
+	/*if ((bClientSimulation && CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy) || (IsNetMode(NM_ListenServer) && CharacterOwner->GetRemoteRole() == ROLE_AutonomousProxy))
 	{
 		FNetworkPredictionData_Client_Character* ClientData = GetPredictionData_Client_Character();
 
@@ -206,7 +208,7 @@ void UVRCharacterMovementComponent::Crouch(bool bClientSimulation)
 			ClientData->MeshTranslationOffset -= FVector(0.f, 0.f, MeshAdjust);
 			ClientData->OriginalMeshTranslationOffset = ClientData->MeshTranslationOffset;
 		}
-	}
+	}*/
 }
 
 void UVRCharacterMovementComponent::UnCrouch(bool bClientSimulation)
@@ -352,7 +354,7 @@ void UVRCharacterMovementComponent::UnCrouch(bool bClientSimulation)
 	CharacterOwner->OnEndCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust);
 
 	// Don't smooth this change in mesh position
-	if (/*(bClientSimulation && CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy) || */(IsNetMode(NM_ListenServer) && CharacterOwner->GetRemoteRole() == ROLE_AutonomousProxy))
+	/*if ((bClientSimulation && CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy) || (IsNetMode(NM_ListenServer) && CharacterOwner->GetRemoteRole() == ROLE_AutonomousProxy))
 	{
 		FNetworkPredictionData_Client_Character* ClientData = GetPredictionData_Client_Character();
 
@@ -361,7 +363,7 @@ void UVRCharacterMovementComponent::UnCrouch(bool bClientSimulation)
 			ClientData->MeshTranslationOffset += FVector(0.f, 0.f, MeshAdjust);
 			ClientData->OriginalMeshTranslationOffset = ClientData->MeshTranslationOffset;
 		}
-	}
+	}*/
 }
 
 FNetworkPredictionData_Client* UVRCharacterMovementComponent::GetPredictionData_Client() const

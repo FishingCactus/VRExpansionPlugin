@@ -171,14 +171,17 @@ public:
 
 	// The grip script that defines the default behaviors of grips
 	// Don't edit this unless you really know what you are doing, leave it empty
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GripMotionController|Advanced")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "GripMotionController|Advanced")
 		TSubclassOf<class UVRGripScriptBase> DefaultGripScriptClass;
 	
 	// This is the pointer to the default grip script
 	// It is here to access so if you want to set some variables on your override then you can
 	// Due to a bug with instanced variables and parent classes you can't directly edit this in subclass in the details panel
-	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "GripMotionController|Advanced")
+	UPROPERTY(VisibleDefaultsOnly, Transient, BlueprintReadOnly, Category = "GripMotionController|Advanced")
 		TObjectPtr<UVRGripScriptBase> DefaultGripScript;
+
+	// This is a pointer to be able to access the display component directly in c++
+	TWeakObjectPtr<const UPrimitiveComponent> DisplayComponentReference;
 
 	// Lerping functions and events
 	void InitializeLerpToHand(FBPActorGripInformation& GripInfo);
@@ -334,10 +337,23 @@ protected:
 	IMotionController* GripPolledMotionController_RenderThread;
 	FCriticalSection GripPolledMotionControllerMutex;
 
-	FTransform GripRenderThreadRelativeTransform;
-	FVector GripRenderThreadComponentScale;
-	FTransform GripRenderThreadProfileTransform;
-	FVector GripRenderThreadLastLocationForLateUpdate;
+	// Late update control variables (should likely struct these soon)
+	struct FRenderTrackingParams
+	{
+		FTransform GripRenderThreadRelativeTransform = FTransform::Identity;
+		FVector GripRenderThreadComponentScale = FVector::ZeroVector;
+		FTransform GripRenderThreadProfileTransform = FTransform::Identity;
+		FVector GripRenderThreadLastLocationForLateUpdate = FVector::ZeroVector;
+
+		// Smoothing info
+		bool bRenderSmoothHandTracking = false;
+		bool bRenderSmoothWithEuroLowPassFunction = false;
+		float RenderSmoothingSpeed = 0.0f;
+		FBPEuroLowPassFilterTrans RenderEuroSmoothingParams;
+		FTransform RenderLastSmoothRelativeTransform = FTransform::Identity;
+		float RenderLastDeltaTime = 0.0f;
+	}LateUpdateParams;
+
 
 	FDelegateHandle NewControllerProfileEvent_Handle;
 	UFUNCTION()
@@ -814,8 +830,6 @@ public:
 	UPROPERTY(EditDefaultsOnly, ReplicatedUsing = OnRep_ReplicatedControllerTransform, Category = "GripMotionController|Networking")
 	FBPVRComponentPosRep ReplicatedControllerTransform;
 
-	FBPVRComponentPosRep MotionSampleUpdateBuffer[2];
-
 	FVector LastUpdatesRelativePosition;
 	FRotator LastUpdatesRelativeRotation;
 
@@ -823,53 +837,14 @@ public:
 	bool bReppedOnce;
 
 	UFUNCTION()
-	virtual void OnRep_ReplicatedControllerTransform()
-	{
-		//ReplicatedControllerTransform.Unpack();
+	virtual void OnRep_ReplicatedControllerTransform();
 
-		if (GetNetMode() < ENetMode::NM_Client && HasTrackingParameters())
-		{
-			// Ensure that the client is sending valid boundries
-			ApplyTrackingParameters(ReplicatedControllerTransform.Position, true);
-		}
 
-		if (bSmoothReplicatedMotion)
-		{
-			static const auto CVarDoubleBufferTrackedDevices = IConsoleManager::Get().FindConsoleVariable(TEXT("vr.DoubleBufferReplicatedTrackedDevices"));
-			if (bReppedOnce)
-			{
-				bLerpingPosition = true;
-				ControllerNetUpdateCount = 0.0f;
-				LastUpdatesRelativePosition = this->GetRelativeLocation();
-				LastUpdatesRelativeRotation = this->GetRelativeRotation();
-
-				if (CVarDoubleBufferTrackedDevices->GetBool())
-				{
-					MotionSampleUpdateBuffer[0] = MotionSampleUpdateBuffer[1];
-					MotionSampleUpdateBuffer[1] = ReplicatedControllerTransform;
-				}
-				else
-				{
-					MotionSampleUpdateBuffer[0] = ReplicatedControllerTransform;
-					// Also set the buffered value in case double buffering gets turned on
-					MotionSampleUpdateBuffer[1] = MotionSampleUpdateBuffer[0];
-				}
-			}
-			else
-			{
-				SetRelativeLocationAndRotation(ReplicatedControllerTransform.Position, ReplicatedControllerTransform.Rotation);
-				bReppedOnce = true;
-
-				// Filling the second index in as well in case they turn on double buffering
-				MotionSampleUpdateBuffer[1] = ReplicatedControllerTransform;
-				MotionSampleUpdateBuffer[0] = MotionSampleUpdateBuffer[1];
-			}
-		}
-		else
-			SetRelativeLocationAndRotation(ReplicatedControllerTransform.Position, ReplicatedControllerTransform.Rotation);
-	}
+	// Run the smoothing step
+	void RunNetworkedSmoothing(float DeltaTime);
 
 	// Rate to update the position to the server, 100htz is default (same as replication rate, should also hit every tick).
+	// On dedicated servers the update rate should be at or lower than the server tick rate for smoothing to work
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category = "GripMotionController|Networking", meta = (ClampMin = "0", UIMin = "0"))
 	float ControllerNetUpdateRate;
 	
@@ -879,6 +854,22 @@ public:
 	// Whether to smooth (lerp) between ticks for the replicated motion, DOES NOTHING if update rate is larger than FPS!
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category = "GripMotionController|Networking")
 		bool bSmoothReplicatedMotion;
+
+	// If true then we will use exponential smoothing with buffered correction
+	UPROPERTY(EditAnywhere, Category = "GripMotionController|Networking|Smoothing", meta = (editcondition = "bSmoothReplicatedMotion"))
+		bool bUseExponentialSmoothing = true;
+
+	// Timestep of smoothing translation
+	UPROPERTY(EditAnywhere, Category = "GripMotionController|Networking|Smoothing", meta = (editcondition = "bUseExponentialSmoothing"))
+		float InterpolationSpeed = 25.0f;
+
+	// Max distance to allow smoothing before snapping the remainder
+	UPROPERTY(EditAnywhere, Category = "GripMotionController|Networking|Smoothing", meta = (editcondition = "bUseExponentialSmoothing"))
+		float NetworkMaxSmoothUpdateDistance = 50.f;
+
+	// Max distance to allow smoothing before snapping entirely to the new position
+	UPROPERTY(EditAnywhere, Category = "GripMotionController|Networking|Smoothing", meta = (editcondition = "bUseExponentialSmoothing"))
+		float NetworkNoSmoothUpdateDistance = 100.f;
 
 	// Whether to replicate even if no tracking (FPS or test characters)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category = "GripMotionController|Networking")
@@ -1005,6 +996,8 @@ public:
 	// If an object is passed in it will attempt to drop it, otherwise it will attempt to find and drop the given grip id
 	UFUNCTION(BlueprintCallable, Category = "GripMotionController")
 		bool DropObjectByInterface(UObject * ObjectToDrop = nullptr, uint8 GripIDToDrop = 0, FVector OptionalAngularVelocity = FVector::ZeroVector, FVector OptionalLinearVelocity = FVector::ZeroVector);
+
+	bool DropObjectByInterface_Implementation(UObject* ObjectToDrop = nullptr, uint8 GripIDToDrop = 0, FVector OptionalAngularVelocity = FVector::ZeroVector, FVector OptionalLinearVelocity = FVector::ZeroVector, bool bSkipNotify = false);
 
 	/* Grip an actor, these are stored in a Tarray that will prevent destruction of the object, you MUST ungrip an actor if you want to kill it
 	   The WorldOffset is the transform that it will remain away from the controller, if you use the world position of the actor then it will grab
@@ -1355,6 +1348,10 @@ public:
 	// Removes a secondary attachment point from a grip
 	UFUNCTION(BlueprintCallable, Category = "GripMotionController")
 		bool RemoveSecondaryAttachmentFromGripByID(const uint8 GripID = 0, float LerpToTime = 0.25f);
+
+	// If this is true the controller will always attempt to get the current tracking information, regardless of it TrackingStatus is Untracked or not
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GripMotionController")
+		bool bIgnoreTrackingStatus;
 
 	// This is for testing, setting it to true allows you to test grip with a non VR enabled pawn
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GripMotionController")
