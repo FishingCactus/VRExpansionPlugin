@@ -168,6 +168,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "GripMotionController|Advanced")
 		bool bProjectNonSimulatingGrips;
 
+	// If true then we will sweep grip teleport operations so that they stop when they will be colliding with something.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "GripMotionController|Advanced")
+		bool bSweepGripTeleports = false;
+
 
 	// The grip script that defines the default behaviors of grips
 	// Don't edit this unless you really know what you are doing, leave it empty
@@ -893,6 +897,19 @@ public:
 		//return MyPawn ? MyPawn->IsLocallyControlled() : (MyOwner && MyOwner->Role == ENetRole::ROLE_Authority);
 	}
 
+	// Shorthand for checking if we are in seamless travel
+	inline bool IsTravelingOrNullWorld() const
+	{
+		UWorld* myWorld = GetWorld();
+		if (IsValid(myWorld))
+		{
+			return myWorld->IsInSeamlessTravel();
+		}
+
+		// We don't have a valid world we are part of, don't do anything.
+		return true;
+	}
+
 	// Returns if this is the owning connection for the motion controller
 	UFUNCTION(BlueprintPure, Category = "GripMotionController", meta = (DisplayName = "IsLocallyControlled"))
 		bool BP_IsLocallyControlled();
@@ -982,7 +999,7 @@ public:
 	// If an object is passed in it will attempt to drop it, otherwise it will attempt to find and drop the given grip id
 	UFUNCTION(BlueprintCallable, Category = "GripMotionController")
 		bool DropObject(
-			UObject * ObjectToDrop = nullptr,
+			UObject* ObjectToDrop = nullptr,
 			uint8 GripIdToDrop = 0,
 			bool bSimulate = false,
 			FVector OptionalAngularVelocity = FVector::ZeroVector,
@@ -990,12 +1007,12 @@ public:
 
 	// Auto grip any uobject that is/root is a primitive component
 	UFUNCTION(BlueprintCallable, Category = "GripMotionController")
-		bool GripObjectByInterface(UObject * ObjectToGrip, const FTransform &WorldOffset, bool bWorldOffsetIsRelative = false, FName OptionalBoneToGripName = NAME_None, FName OptionalSnapToSocketName = NAME_None, bool bIsSlotGrip = false);
+		bool GripObjectByInterface(UObject* ObjectToGrip, const FTransform &WorldOffset, bool bWorldOffsetIsRelative = false, FName OptionalBoneToGripName = NAME_None, FName OptionalSnapToSocketName = NAME_None, bool bIsSlotGrip = false);
 
 	// Auto drop any uobject that is/root is a primitive component and has the VR Grip Interface
 	// If an object is passed in it will attempt to drop it, otherwise it will attempt to find and drop the given grip id
 	UFUNCTION(BlueprintCallable, Category = "GripMotionController")
-		bool DropObjectByInterface(UObject * ObjectToDrop = nullptr, uint8 GripIDToDrop = 0, FVector OptionalAngularVelocity = FVector::ZeroVector, FVector OptionalLinearVelocity = FVector::ZeroVector);
+		bool DropObjectByInterface(UObject* ObjectToDrop = nullptr, uint8 GripIDToDrop = 0, FVector OptionalAngularVelocity = FVector::ZeroVector, FVector OptionalLinearVelocity = FVector::ZeroVector);
 
 	bool DropObjectByInterface_Implementation(UObject* ObjectToDrop = nullptr, uint8 GripIDToDrop = 0, FVector OptionalAngularVelocity = FVector::ZeroVector, FVector OptionalLinearVelocity = FVector::ZeroVector, bool bSkipNotify = false);
 
