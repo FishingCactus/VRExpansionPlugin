@@ -278,6 +278,11 @@ public:
 	UPROPERTY(Transient, DuplicateTransient)
 		AVRPlayerController* OwningVRPlayerController;
 
+	// If true then we will retain roomscale tracking in relative space of the character.
+	// If false than the movement component will offset to the hmd tracking and the tracking will be nulled out
+	UPROPERTY(Category = VRBaseCharacter, EditAnywhere, BlueprintReadOnly)
+		bool bRetainRoomscale = true;
+
 	//virtual void CacheInitialMeshOffset(FVector MeshRelativeLocation, FRotator MeshRelativeRotation) override;
 	virtual void PostInitializeComponents() override;
 
@@ -452,10 +457,17 @@ public:
 	// Call to use an object
 	UPROPERTY(BlueprintAssignable, Category = "Seating")
 		FVRSeatThresholdChangedSignature OnSeatThreshholdChanged_Bind;
-	
+
+	virtual FVector GetTargetHeightOffset()
+	{
+		return FVector::ZeroVector;
+	}
+
 	void ZeroToSeatInformation()
 	{
+
 		SetSeatRelativeLocationAndRotationVR(FVector::ZeroVector);
+
 		NotifyOfTeleport();
 		//LeftMotionController->PostTeleportMoveGrippedObjects();
 		//RightMotionController->PostTeleportMoveGrippedObjects();

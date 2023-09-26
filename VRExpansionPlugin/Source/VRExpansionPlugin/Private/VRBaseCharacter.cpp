@@ -9,6 +9,7 @@
 #include "Components/CapsuleComponent.h"
 #include "ParentRelativeAttachmentComponent.h"
 #include "GripMotionControllerComponent.h"
+#include "VRRootComponent.h"
 #include "VRPathFollowingComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "XRMotionControllerBase.h"
@@ -56,6 +57,15 @@ AVRBaseCharacter::AVRBaseCharacter(const FObjectInitializer& ObjectInitializer)
 	if (NetSmoother)
 	{
 		NetSmoother->SetupAttachment(RootComponent);
+
+		if (!bRetainRoomscale)
+		{
+			if (UVRRootComponent* MyRoot = Cast<UVRRootComponent>(RootComponent))
+			{
+				NetSmoother->SetRelativeLocation(MyRoot->GetTargetHeightOffset());
+				//VRProxyComponent->SetRelativeLocation(MyRoot->GetTargetHeightOffset());
+			}
+		}
 	}
 
 	VRProxyComponent = CreateDefaultSubobject<USceneComponent>(AVRBaseCharacter::VRProxyComponentName);
@@ -576,7 +586,7 @@ void AVRBaseCharacter::InitSeatedModeTransition()
 				bUseControllerRotationYaw = SeatInformation.bOriginalControlRotation;
 
 				SetActorLocationAndRotationVR(SeatInformation.StoredTargetTransform.GetTranslation(), SeatInformation.StoredTargetTransform.Rotator(), true, true, true);
-				
+
 				if (IsValid(LeftMotionController))
 				{
 					LeftMotionController->PostTeleportMoveGrippedObjects();
@@ -653,7 +663,7 @@ void AVRBaseCharacter::TickSeatInformation(float DeltaTime)
 	float LastThresholdScaler = SeatInformation.CurrentThresholdScaler;
 	bool bLastOverThreshold = SeatInformation.bIsOverThreshold;
 
-	FVector NewLoc = VRReplicatedCamera->GetRelativeLocation();
+	FVector NewLoc = VRReplicatedCamera->ReplicatedCameraTransform.Position;//GetRelativeLocation();
 	FVector OrigLocation = SeatInformation.InitialRelCameraTransform.GetTranslation();
 
 	if (!SeatInformation.bZeroToHead)
@@ -683,15 +693,44 @@ void AVRBaseCharacter::TickSeatInformation(float DeltaTime)
 		// Force them back into range
 		FVector diff = NewLoc - OrigLocation;
 		diff.Normalize();
-		diff = (-diff * (AbsDistance - SeatInformation.AllowedRadius));
 
-		SetSeatRelativeLocationAndRotationVR(diff);
+		if (bRetainRoomscale)
+		{
+			diff = (-diff * (AbsDistance - SeatInformation.AllowedRadius));
+			SetSeatRelativeLocationAndRotationVR(diff);
+		}
+		else
+		{
+			diff = (diff * (SeatInformation.AllowedRadius));
+			diff.Z = 0.0f;
+			SetSeatRelativeLocationAndRotationVR(diff);
+		}
+
 		SeatInformation.bWasOverLimit = true;
 	}
 	else if (SeatInformation.bWasOverLimit) // Make sure we are in the zero point otherwise
 	{
-		SetSeatRelativeLocationAndRotationVR(FVector::ZeroVector);
+		if (bRetainRoomscale)
+		{
+			SetSeatRelativeLocationAndRotationVR(FVector::ZeroVector);
+		}
+		else
+		{
+			FVector diff = NewLoc - OrigLocation;
+			diff.Z = 0.0f;
+			SetSeatRelativeLocationAndRotationVR(diff);
+		}
+
 		SeatInformation.bWasOverLimit = false;
+	}
+	else
+	{
+		if (!bRetainRoomscale)
+		{
+			FVector diff = NewLoc - OrigLocation;
+			diff.Z = 0.0f;
+			SetSeatRelativeLocationAndRotationVR(diff);
+		}
 	}
 
 	if (AbsDistance > SeatInformation.AllowedRadius - SeatInformation.AllowedRadiusThreshold)
@@ -717,6 +756,13 @@ bool AVRBaseCharacter::SetSeatedMode(USceneComponent * SeatParent, bool bSetSeat
 	{
 		if (!SeatParent)
 			return false;
+
+		// Automate the intial relative camera transform for this mode
+		// I think we can remove the initial value alltogether eventually right?
+		if (!bRetainRoomscale)
+		{
+			InitialRelCameraTransform = FTransform(VRReplicatedCamera->ReplicatedCameraTransform.Rotation, VRReplicatedCamera->ReplicatedCameraTransform.Position, VRReplicatedCamera->GetComponentScale());
+		}
 
 		SeatInformation.SeatParent = SeatParent;
 		SeatInformation.bSitting = true;
@@ -766,11 +812,19 @@ void AVRBaseCharacter::SetSeatRelativeLocationAndRotationVR(FVector DeltaLoc)
 
 	SetActorRelativeTransform(FTransform(NewRot, NewLoc, GetCapsuleComponent()->RelativeScale3D));*/
 
+	FVector ZOffset = -GetTargetHeightOffset() * GetCapsuleComponent()->GetRelativeScale3D();
+
 	FTransform NewTrans = SeatInformation.StoredTargetTransform;// *SeatInformation.SeatParent->GetComponentTransform();
+
+	if (!bRetainRoomscale)
+	{
+		NewTrans.SetTranslation(FVector(0.0f, 0.0f, NewTrans.GetTranslation().Z));
+	}
+
 
 	FVector NewLocation;
 	FRotator NewRotation;
-	FVector PivotPoint = SeatInformation.InitialRelCameraTransform.GetTranslation();
+	FVector PivotPoint = bRetainRoomscale ? SeatInformation.InitialRelCameraTransform.GetTranslation() : FVector::ZeroVector;
 	PivotPoint.Z = 0.0f;
 
 	NewRotation = SeatInformation.InitialRelCameraTransform.Rotator();
@@ -779,7 +833,7 @@ void AVRBaseCharacter::SetSeatRelativeLocationAndRotationVR(FVector DeltaLoc)
 	NewLocation -= NewRotation.RotateVector(PivotPoint + (-DeltaLoc));	
 
 	// Also setting actor rot because the control rot transfers to it anyway eventually
-	SetActorRelativeTransform(FTransform(NewRotation, NewLocation, GetCapsuleComponent()->GetRelativeScale3D()));
+	SetActorRelativeTransform(FTransform(NewRotation, NewLocation + ZOffset, GetCapsuleComponent()->GetRelativeScale3D()));
 }
 
 FVector AVRBaseCharacter::GetProjectedVRLocation() const

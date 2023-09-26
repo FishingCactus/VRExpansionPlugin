@@ -40,7 +40,6 @@ UParentRelativeAttachmentComponent::UParentRelativeAttachmentComponent(const FOb
 	bUpdateInCharacterMovement = true;
 	bIsPaused = false;
 
-	bUseFeetLocation = false;
 	CustomOffset = FVector::ZeroVector;
 
 	//YawRotationMethod = EVR_PRC_RotationMethod::PRC_ROT_HMD;
@@ -107,6 +106,47 @@ void UParentRelativeAttachmentComponent::SetPaused(bool bNewPaused, bool bZeroOu
 	}
 }
 
+void UParentRelativeAttachmentComponent::SetRelativeRotAndLoc(FVector NewRelativeLocation, FRotator NewRelativeRotation, float DeltaTime)
+{
+
+	RunSampling(NewRelativeRotation, NewRelativeLocation);
+
+	if (bUseFeetLocation)
+	{
+		FVector TotalOffset = CustomOffset;
+		if (bUseCenterAsFeetLocation && AttachChar && AttachChar->VRRootReference)
+		{
+			TotalOffset.Z += AttachChar->VRRootReference->GetUnscaledCapsuleHalfHeight();
+		}
+
+		if (!bIgnoreRotationFromParent)
+		{
+			SetRelativeLocationAndRotation(
+				FVector(NewRelativeLocation.X, NewRelativeLocation.Y, 0.0f) + TotalOffset,
+				GetCalculatedRotation(NewRelativeRotation, DeltaTime)
+			);
+		}
+		else
+		{
+			SetRelativeLocation(FVector(NewRelativeLocation.X, NewRelativeLocation.Y, 0.0f) + TotalOffset);
+		}
+	}
+	else
+	{
+		if (!bIgnoreRotationFromParent)
+		{
+			SetRelativeLocationAndRotation(
+				NewRelativeLocation + CustomOffset,
+				GetCalculatedRotation(NewRelativeRotation, DeltaTime)
+			); // Use the HMD height instead
+		}
+		else
+		{
+			SetRelativeLocation(NewRelativeLocation + CustomOffset); // Use the HMD height instead
+		}
+	}
+}
+
 void UParentRelativeAttachmentComponent::UpdateTracking(float DeltaTime)
 {
 	// We are paused, do not update tracking anymore
@@ -136,7 +176,16 @@ void UParentRelativeAttachmentComponent::UpdateTracking(float DeltaTime)
 	}
 	else if (IsValid(AttachChar)) // New case to early out and with less calculations
 	{
-		SetRelativeRotAndLoc(AttachChar->VRRootReference->curCameraLoc, AttachChar->VRRootReference->StoredCameraRotOffset, DeltaTime);
+		if (AttachChar->bRetainRoomscale)
+		{
+			SetRelativeRotAndLoc(AttachChar->VRRootReference->curCameraLoc, AttachChar->VRRootReference->StoredCameraRotOffset, DeltaTime);
+		}
+		else
+		{
+			FVector CameraLoc = FVector(0.0f, 0.0f, AttachChar->VRRootReference->curCameraLoc.Z);
+			CameraLoc += AttachChar->VRRootReference->StoredCameraRotOffset.RotateVector(FVector(-AttachChar->VRRootReference->VRCapsuleOffset.X, -AttachChar->VRRootReference->VRCapsuleOffset.Y, 0.0f));
+			SetRelativeRotAndLoc(CameraLoc, AttachChar->VRRootReference->StoredCameraRotOffset, DeltaTime);
+		}
 	}
 	else if (IsLocallyControlled() && GEngine->XRSystem.IsValid() && GEngine->XRSystem->IsHeadTrackingAllowed())
 	{

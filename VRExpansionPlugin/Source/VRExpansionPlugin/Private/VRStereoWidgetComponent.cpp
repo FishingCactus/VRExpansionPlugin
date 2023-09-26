@@ -5,7 +5,10 @@
 
 #include "VRExpansionFunctionLibrary.h"
 #include "IXRTrackingSystem.h"
+#include "IXRCamera.h"
 #include "VRBaseCharacter.h"
+#include "VRCharacter.h"
+#include "VRRootComponent.h"
 #include "TextureResource.h"
 #include "Engine/Texture.h"
 #include "IStereoLayers.h"
@@ -16,6 +19,7 @@
 #include "EngineGlobals.h"
 #include "MaterialShared.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialRenderProxy.h"
 #include "Engine/Engine.h"
 //#include "Widgets/SWindow.h"
 #include "Engine/TextureRenderTarget2D.h"
@@ -566,8 +570,25 @@ void UVRStereoWidgetComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 					{
 						if (USceneComponent* CameraParent = BaseVRChar->VRReplicatedCamera->GetAttachParent())
 						{
+							FTransform DeltaTrans = FTransform::Identity;
+							if (!BaseVRChar->bRetainRoomscale)
+							{
+								FVector HMDLoc;
+								FQuat HMDRot;
+								GEngine->XRSystem->GetCurrentPose(IXRTrackingSystem::HMDDeviceId, HMDRot, HMDLoc);
+
+								HMDLoc.Z = 0.0f;
+
+								if (AVRCharacter* VRChar = Cast<AVRCharacter>(mpawn))
+								{
+									HMDLoc += UVRExpansionFunctionLibrary::GetHMDPureYaw_I(HMDRot.Rotator()).RotateVector(FVector(VRChar->VRRootReference->VRCapsuleOffset.X, VRChar->VRRootReference->VRCapsuleOffset.Y, 0.0f));
+								}
+
+								DeltaTrans = FTransform(FQuat::Identity, HMDLoc, FVector(1.0f));
+							}
+
 							Transform = OffsetTransform.GetRelativeTransform(CameraParent->GetComponentTransform());
-							Transform = FTransform(FRotator(0.f, -180.f, 0.f)) * Transform;
+							Transform = (FTransform(FRotator(0.f, -180.f, 0.f)) * Transform) * DeltaTrans;
 							bHandledTransform = true;
 						}
 					}
@@ -637,12 +658,13 @@ void UVRStereoWidgetComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 	if (bIsDirty)
 	{
 		// OpenXR doesn't take the transforms scale component into account for the stereo layer, so we need to scale the buffer instead
-		bool bScaleBuffer = false;
+		// Fixed? In 5.2, leaving code commented out in case I need to bring it back
+		/*bool bScaleBuffer = false;
 		static FName SystemName(TEXT("OpenXR"));
 		if (GEngine->XRSystem.IsValid() && (GEngine->XRSystem->GetSystemName() == SystemName))
 		{
 			bScaleBuffer = true;
-		}
+		}*/
 
 		IStereoLayers::FLayerDesc LayerDsec;
 		LayerDsec.Priority = Priority;
@@ -652,18 +674,18 @@ void UVRStereoWidgetComponent::TickComponent(float DeltaTime, enum ELevelTick Ti
 		if (bDelayForRenderThread && !LastTransform.Equals(FTransform::Identity))
 		{
 			LayerDsec.Transform = LastTransform;
-			if (bScaleBuffer)
+			/*if (bScaleBuffer)
 			{
 				LayerDsec.QuadSize = FVector2D(DrawSize) * FVector2D(LastTransform.GetScale3D());
-			}
+			}*/
 		}
 		else
 		{
 			LayerDsec.Transform = Transform;
-			if (bScaleBuffer)
+			/*if (bScaleBuffer)
 			{
 				LayerDsec.QuadSize = FVector2D(DrawSize) * FVector2D(Transform.GetScale3D());
-			}
+			}*/
 		}
 
 		if (RenderTarget)
