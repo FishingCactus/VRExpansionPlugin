@@ -4647,6 +4647,7 @@ void UGripMotionControllerComponent::UpdateTracking(float DeltaTime)
 			ETrackingStatus LastTrackingStatus = CurrentTrackingStatus;
 			const bool bNewTrackedState = GripPollControllerState(Position, Orientation, WorldToMeters);
 
+			PRAGMA_DISABLE_DEPRECATION_WARNINGS
 			// Pull a reference to the private display component if it should exist
 			if (bDisplayDeviceModel && !IsValid(DisplayComponentReference.Get()))
 			{
@@ -4661,6 +4662,7 @@ void UGripMotionControllerComponent::UpdateTracking(float DeltaTime)
 					}
 				}
 			}
+            PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
 			// if controller tracking just kicked in or we haven't gotten a valid model yet
 			if (!bTracked && bNewTrackedState && !bHasStartedRendering)
