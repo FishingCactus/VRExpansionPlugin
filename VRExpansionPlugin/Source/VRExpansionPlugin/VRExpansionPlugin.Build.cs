@@ -15,6 +15,7 @@ public class VRExpansionPlugin : ModuleRules
         //bEnforceIWYU = true;
 
         PublicDefinitions.Add("WITH_VR_EXPANSION=1");
+        SetupIrisSupport(Target);
 
         // To detect VR Preview, not built out in packaged builds
         if (Target.bBuildEditor == true)
@@ -71,11 +72,12 @@ public class VRExpansionPlugin : ModuleRules
                     "NavigationSystem",
                     "AIModule",
                     "AnimGraphRuntime",
+                    "XRBase",
+                    "GameplayTags",
                     "SwarmsBase",
                     "ModularGameplayActors",
                     "GameplayAbilities",
                     "GameBaseFramework"
-
                     //"Renderer",
                     //"UtilityShaders"
         });
@@ -85,7 +87,6 @@ public class VRExpansionPlugin : ModuleRules
             PublicDependencyModuleNames.Add("Chaos");
             PublicDependencyModuleNames.Add("ChaosVehicles");
         //}
-
 
         PrivateDependencyModuleNames.AddRange(
             new string[] 
@@ -100,10 +101,7 @@ public class VRExpansionPlugin : ModuleRules
 				"ApplicationCore",
                 "RenderCore",
                // "ShaderCore",
-                "NetworkReplayStreaming",
-                "AIModule",
-                "UMG",
-                "GameplayTags"
+                "NetworkReplayStreaming"
                 //"Renderer",
                // "UtilityShaders"
             });
