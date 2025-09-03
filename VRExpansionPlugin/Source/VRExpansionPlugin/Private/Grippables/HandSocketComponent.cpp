@@ -3,19 +3,29 @@
 #include "Grippables/HandSocketComponent.h"
 #include UE_INLINE_GENERATED_CPP_BY_NAME(HandSocketComponent)
 
+#include "CoreMinimal.h"
+#include "UObject/UObjectIterator.h"
 #include "Engine/CollisionProfile.h"
+#include "BoneContainer.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimInstanceProxy.h"
 #include "Animation/PoseSnapshot.h"
 #include "Animation/AnimData/AnimDataModel.h"
+#include "Engine/SkinnedAssetCommon.h"
+#include "Engine/SkinnedAsset.h"
 //#include "VRExpansionFunctionLibrary.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/PoseableMeshComponent.h"
 #include "GripMotionControllerComponent.h"
 //#include "VRGripInterface.h"
 //#include "VRBPDatatypes.h"
+#include "Engine/SkinnedAssetCommon.h"
 #include "Net/UnrealNetwork.h"
 #include "Serialization/CustomVersion.h"
+
+#if WITH_PUSH_MODEL
+#include "Net/Core/PushModel/PushModel.h"
+#endif
 
 DEFINE_LOG_CATEGORY(LogVRHandSocketComponent);
 
@@ -387,7 +397,8 @@ bool UHandSocketComponent::GetBlendedPoseSnapShot(FPoseSnapshot& PoseSnapShot, U
 		PoseSnapShot.LocalTransforms.Empty();
 		TargetMesh->GetBoneNames(PoseSnapShot.BoneNames);
 
-		PoseSnapShot.LocalTransforms = TargetMesh->GetSkinnedAsset()->GetSkeleton()->GetRefLocalPoses();
+		//PoseSnapShot.LocalTransforms = TargetMesh->GetSkinnedAsset()->GetSkeleton()->GetRefLocalPoses();
+		PoseSnapShot.LocalTransforms = TargetMesh->GetSkinnedAsset()->GetRefSkeleton().GetRefBonePose();
 
 		FQuat DeltaQuat = FQuat::Identity;
 		FName TargetBoneName = NAME_None;
@@ -682,7 +693,7 @@ void UHandSocketComponent::OnRegister()
 			{
 				if (HandPreviewMaterial)
 				{
-					HandVisualizerComponent->SetMaterial(0, (UMaterialInterface*)HandPreviewMaterial);
+					HandVisualizerComponent->SetMaterial(0, HandPreviewMaterial);
 				}
 				HandVisualizerComponent->SetSkinnedAssetAndUpdate(VisualizationMesh);
 			}
@@ -772,9 +783,21 @@ void UHandSocketComponent::PoseVisualizationToAnimation(bool bForceRefresh)
 	if (!HandTargetAnimation)
 	{
 		// Store local poses for posing
-		LocalPoses = HandVisualizerComponent->GetSkinnedAsset()->GetSkeleton()->GetRefLocalPoses();
+		LocalPoses = HandVisualizerComponent->GetSkinnedAsset()->GetRefSkeleton().GetRefBonePose();
 	}
 
+
+
+	// Check out of the skin cache, the poses don't update otherwise when enabled
+	int32 NumLODs = HandVisualizerComponent->GetNumLODs();
+	HandVisualizerComponent->SkinCacheUsage.Empty(NumLODs);
+
+	for (int nLODs = 0; nLODs <= NumLODs; ++nLODs)
+	{
+		HandVisualizerComponent->SkinCacheUsage.Add(ESkinCacheUsage::Disabled);
+	}
+
+	// Now Pose the bones
 	TArray<FName> BonesNames;
 	HandVisualizerComponent->GetBoneNames(BonesNames);
 	int32 Bones = HandVisualizerComponent->GetNumBones();
@@ -821,6 +844,7 @@ void UHandSocketComponent::PoseVisualizationToAnimation(bool bForceRefresh)
 		else
 		{
 			BoneTrans = LocalPoses[i];
+			//BoneTrans = HandVisualizerComponent->GetSkinnedAsset()->GetRefSkeleton().GetRefBonePose()[i];
 		}
 
 		BoneTrans = BoneTrans * ParentTrans;// *HandVisualizerComponent->GetComponentTransform();
@@ -831,7 +855,6 @@ void UHandSocketComponent::PoseVisualizationToAnimation(bool bForceRefresh)
 		BoneTrans.ConcatenateRotation(DeltaQuat);
 		BoneTrans.NormalizeRotation();
 		HandVisualizerComponent->SetBoneTransformByName(BonesNames[i], BoneTrans, EBoneSpaces::ComponentSpace);
-
 	}
 
 	if (HandVisualizerComponent && (!bTickedPose || bForceRefresh))
@@ -876,10 +899,17 @@ void UHandSocketComponent::OnComponentDestroyed(bool bDestroyingHierarchy)
 void UHandSocketComponent::GetLifetimeReplicatedProps(TArray< class FLifetimeProperty > & OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-	
-	DOREPLIFETIME(UHandSocketComponent, bRepGameplayTags);
-	DOREPLIFETIME(UHandSocketComponent, bReplicateMovement);
-	DOREPLIFETIME_CONDITION(UHandSocketComponent, GameplayTags, COND_Custom);
+
+	// For std properties
+	FDoRepLifetimeParams PushModelParams{ COND_None, REPNOTIFY_OnChanged, /*bIsPushBased=*/true };
+
+	DOREPLIFETIME_WITH_PARAMS_FAST(UHandSocketComponent, bRepGameplayTags, PushModelParams);
+	DOREPLIFETIME_WITH_PARAMS_FAST(UHandSocketComponent, bReplicateMovement, PushModelParams);
+
+	// For properties with special conditions
+	FDoRepLifetimeParams PushModelParamsWithCondition{ COND_Custom, REPNOTIFY_OnChanged, /*bIsPushBased=*/true };
+
+	DOREPLIFETIME_WITH_PARAMS_FAST(UHandSocketComponent, GameplayTags, PushModelParamsWithCondition);
 }
 
 void UHandSocketComponent::PreReplication(IRepChangedPropertyTracker & ChangedPropertyTracker)
@@ -963,4 +993,47 @@ UHandSocketComponent* UHandSocketComponent::GetHandSocketComponentFromObject(UOb
 	}
 
 	return nullptr;
+}
+
+/////////////////////////////////////////////////
+//- Push networking getter / setter functions
+/////////////////////////////////////////////////
+
+void UHandSocketComponent::SetRepGameplayTags(bool bNewRepGameplayTags)
+{
+	bRepGameplayTags = bNewRepGameplayTags;
+#if WITH_PUSH_MODEL
+	MARK_PROPERTY_DIRTY_FROM_NAME(UHandSocketComponent, bRepGameplayTags, this);
+#endif
+}
+
+void UHandSocketComponent::SetReplicateMovement(bool bNewReplicateMovement)
+{
+	bReplicateMovement = bNewReplicateMovement;
+#if WITH_PUSH_MODEL
+	MARK_PROPERTY_DIRTY_FROM_NAME(UHandSocketComponent, bReplicateMovement, this);
+#endif
+}
+
+FGameplayTagContainer& UHandSocketComponent::GetGameplayTags()
+{
+#if WITH_PUSH_MODEL
+	if (bRepGameplayTags)
+	{
+		MARK_PROPERTY_DIRTY_FROM_NAME(UHandSocketComponent, GameplayTags, this);
+	}
+#endif
+
+	return GameplayTags;
+}
+
+/////////////////////////////////////////////////
+//- End Push networking getter / setter functions
+/////////////////////////////////////////////////
+
+void UHandSocketAnimInstance::NativeInitializeAnimation()
+{
+	Super::NativeInitializeAnimation();
+
+	OwningSocket = Cast<UHandSocketComponent>(GetOwningComponent()->GetAttachParent());
 }
